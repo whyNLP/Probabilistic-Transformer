@@ -282,8 +282,7 @@ class ProbEncoderWithDistance(nn.Module):
         self.regularize = regularize
         self.norm = norm
         self.dists = dists
-        self._dists = sorted([int(n) for n in dists.split(',') if n])
-        assert len(self._dists) > 0, "Empty distance pattern! Please use ProbEncoder instead."
+        self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
         self.output_prob = output_prob
 
         if self.norm == 'softmax':
@@ -307,11 +306,12 @@ class ProbEncoderWithDistance(nn.Module):
         mask2d = ~mask2d.view(batch_size, max_len, max_len, 1)
 
         distmask = torch.ones(len(self._dists)+1, max_len, max_len, dtype=torch.float).to(x.device)
-        distmask[0] = distmask[0].tril(self._dists[0]-1)
-        for i in range(1, len(self._dists)):
-            ni_1, ni = self._dists[i-1], self._dists[i]
-            distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
-        distmask[-1] = distmask[-1].triu(self._dists[-1])
+        if len(self._dists) > 0: # At least two dist blocks
+            distmask[0] = distmask[0].tril(self._dists[0]-1)
+            for i in range(1, len(self._dists)):
+                ni_1, ni = self._dists[i-1], self._dists[i]
+                distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
+            distmask[-1] = distmask[-1].triu(self._dists[-1])
 
         ## Unary score
         unary = x # (batch_size, max_len, d_model)
@@ -440,8 +440,7 @@ class ProbEncoderTDWithDistance(nn.Module):
         self.regularize = regularize
         self.norm = norm
         self.dists = dists
-        self._dists = sorted([int(n) for n in dists.split(',') if n])
-        assert len(self._dists) > 0, "Empty distance pattern! Please use ProbEncoder instead."
+        self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
         self.output_prob = output_prob
 
         if self.norm == 'softmax':
@@ -469,11 +468,12 @@ class ProbEncoderTDWithDistance(nn.Module):
         mask2d = ~mask2d.view(batch_size, max_len, max_len, 1)
 
         distmask = torch.ones(len(self._dists)+1, max_len, max_len, dtype=torch.float).to(x.device)
-        distmask[0] = distmask[0].tril(self._dists[0]-1)
-        for i in range(1, len(self._dists)):
-            ni_1, ni = self._dists[i-1], self._dists[i]
-            distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
-        distmask[-1] = distmask[-1].triu(self._dists[-1])
+        if len(self._dists) > 0: # At least two dist blocks
+            distmask[0] = distmask[0].tril(self._dists[0]-1)
+            for i in range(1, len(self._dists)):
+                ni_1, ni = self._dists[i-1], self._dists[i]
+                distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
+            distmask[-1] = distmask[-1].triu(self._dists[-1])
 
         ## Unary score
         unary = x # (batch_size, max_len, d_model)

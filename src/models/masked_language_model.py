@@ -1,7 +1,3 @@
-from pickle import FALSE
-from numpy.lib.arraysetops import isin
-from torch.functional import _index_tensor_with_indices_list
-
 from flair.embeddings.token import OneHotEmbeddings
 from .sequence_tagger import CustomSequenceTagger
 
