@@ -1,0 +1,47 @@
+[Basic]
+random_seed = 0
+cuda_id     = 1
+
+base_path   = "/public/sist/home/jiazx/why/ProbTransformer/models/ner"
+folder_name = "transformer"
+
+[Corpus]
+tag_type = "ner"
+
+    # [Corpus.PennTreebankCorpus]
+    # splits = "0-18|19-21|22-24"
+
+    # [Corpus.UD_ENGLISH]
+
+    [Corpus.AUTO_CONLL_03]
+
+[Embeddings]
+
+    [Embeddings.OneHotEmbeddings]
+    embedding_length = 256
+    min_freq         = 2
+
+[SequenceTagger]
+
+    # [SequenceTagger.module]
+    # name             = "Identity"
+
+    # [SequenceTagger.module]
+    # name             = "ProbEncoderTD"
+    # d_model          = 256
+
+    # [SequenceTagger.module]
+    # name             = "ProbEncoder"
+    # d_model          = 256
+
+    [SequenceTagger.module]
+    name             = "TransformerEncoder"
+    d_model          = 256
+
+[Trainer]
+learning_rate        = 0.001
+mini_batch_size      = 64
+max_epochs           = 32
+shuffle              = true
+scheduler            = "torch.optim.lr_scheduler.OneCycleLR"
+pct_start            = 0.02
