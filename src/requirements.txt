@@ -4,3 +4,4 @@ torchvision==0.10.0
 nltk==3.6.5
 toml==0.10.2
 flair==0.8.0.post1
+Deprecated==1.2.12
