@@ -116,14 +116,15 @@ class ProbEncoder(nn.Module):
             q_y.masked_fill_(mask2d, 0)
             
             # Calculate 2nd message for different dists
-            second_order_message = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.ternary[0], distmask], backend='torch') + \
-                                   oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.ternary[1], distmask], backend='torch')
+            second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.ternary[0], distmask], backend='torch') + \
+                                     oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.ternary[1], distmask], backend='torch')
+
+            second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.ternary[0], distmask], backend='torch') + \
+                                     oe.contract('zja,zib,kabc,kij->zijc',*[q_z, q_z, self.ternary[1], distmask], backend='torch')
             
             # Update
-            q_y = cache_qy * self.damping + \
-                    (oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.ternary[0], distmask], backend='torch') + \
-                    oe.contract('zja,zib,kabc,kij->zijc',*[q_z, q_z, self.ternary[1], distmask], backend='torch')) * (1-self.damping) / self.regularize
-            q_z = cache_qz * self.damping + (unary + second_order_message) * (1-self.damping) / self.regularize
+            q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
+            q_z = cache_qz * self.damping + (unary + second_order_message_F) * (1-self.damping) / self.regularize
                 
         if DEBUG:
             if 'cnt' not in self.__dict__:
@@ -277,14 +278,15 @@ class ProbEncoderTD(nn.Module):
             q_y = q_y - torch.diag_embed(q_y.diagonal(dim1=1, dim2=2), dim1=1, dim2=2)
             q_y.masked_fill_(mask2d, 0)
             
-            second_order_message = oe.contract('zjb,zijc,kad,kbd,kcd,kij->zia', *[q_z, q_y, self.U[0], self.V[0], self.W[0], distmask], backend='torch') + \
-                                   oe.contract('zjb,zjic,kad,kbd,kcd,kij->zia', *[q_z, q_y, self.U[1], self.V[1], self.W[1], distmask], backend='torch')
+            second_order_message_F = oe.contract('zjb,zijc,kad,kbd,kcd,kij->zia', *[q_z, q_y, self.U[0], self.V[0], self.W[0], distmask], backend='torch') + \
+                                     oe.contract('zjb,zjic,kad,kbd,kcd,kij->zia', *[q_z, q_y, self.U[1], self.V[1], self.W[1], distmask], backend='torch')
+
+            second_order_message_G = oe.contract('zia,zjb,kad,kbd,kcd,kij->zijc',*[q_z, q_z, self.U[0], self.V[0], self.W[0], distmask], backend='torch') + \
+                                     oe.contract('zja,zib,kad,kbd,kcd,kij->zijc',*[q_z, q_z, self.U[1], self.V[1], self.W[1], distmask], backend='torch')
             
             # Update
-            q_y = cache_qy * self.damping + \
-                    (oe.contract('zia,zjb,kad,kbd,kcd,kij->zijc',*[q_z, q_z, self.U[0], self.V[0], self.W[0], distmask], backend='torch') + \
-                    oe.contract('zja,zib,kad,kbd,kcd,kij->zijc',*[q_z, q_z, self.U[1], self.V[1], self.W[1], distmask], backend='torch')) * (1-self.damping) / self.regularize
-            q_z = cache_qz * self.damping + (unary + second_order_message) * (1-self.damping) / self.regularize
+            q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
+            q_z = cache_qz * self.damping + (unary + second_order_message_F) * (1-self.damping) / self.regularize
                 
         if DEBUG:
             if 'cnt' not in self.__dict__:
