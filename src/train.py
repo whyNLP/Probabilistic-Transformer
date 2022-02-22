@@ -31,8 +31,7 @@ import flair.datasets
 from flair.data import Corpus, Dictionary
 from flair.embeddings import (
     TokenEmbeddings,
-    StackedEmbeddings,
-    OneHotEmbeddings
+    StackedEmbeddings
 )
 import flair.embeddings
 from flair.training_utils import EvaluationMetric, add_file_handler
@@ -57,31 +56,16 @@ log.info(corpus)
 
 
 # 3. make the tag dictionary from the corpus
-if tag_type == 'mlm':
-    ## Specially take care of MLM
-    min_freq = config["Embeddings"]["MLMOneHotEmbeddings"]["min_freq"]
-
-    tag_dictionary = Dictionary()
-    tokens = list(map((lambda s: s.tokens), corpus.train))
-    tokens = [token for sublist in tokens for token in sublist]
-    most_common = Counter(list(map((lambda t: t.text), tokens)))
-    tokens = [token for token, freq in most_common.items() if freq >= min_freq]
-    for token in tokens: tag_dictionary.add_item(token)
-else:
-    tag_dictionary = corpus.make_tag_dictionary(tag_type=tag_type)
+tag_dictionary = corpus.make_tag_dictionary(tag_type=tag_type)
 log.info(tag_dictionary)
 
 
 # 4. select embeddings
 embedding_types: List[TokenEmbeddings] = []
 if "OneHotEmbeddings" in config["Embeddings"]:
-    import sys, os
-    sys.stdout = open(os.devnull, 'w')
-    word_embedding = OneHotEmbeddings(**(config["Embeddings"].pop("OneHotEmbeddings")), corpus=corpus)
+    word_embedding = embeddings.OneHotEmbeddings(**(config["Embeddings"].pop("OneHotEmbeddings")), corpus=corpus)
     word_embedding.instance_parameters["corpus"] = corpus_name # FIXME: this is a quick fix for error in saving conll03.
     embedding_types.append(word_embedding)
-    sys.stdout = sys.__stdout__
-    log.info(f"OneHotEmbeddings: Vocab size = {len(word_embedding.vocab_dictionary)}")
 if "MLMOneHotEmbeddings" in config["Embeddings"]:
     word_embedding = embeddings.MLMOneHotEmbeddings(**(config["Embeddings"].pop("MLMOneHotEmbeddings")), corpus=corpus)
     embedding_types.append(word_embedding)

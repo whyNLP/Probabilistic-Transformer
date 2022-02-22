@@ -6,6 +6,7 @@ import time
 import datetime
 import sys
 import inspect
+import numpy as np
 
 import torch
 from torch.optim.sgd import SGD
@@ -103,6 +104,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         fix_train_mask: bool = False,
         fix_dev_mask: bool = False,
         fix_test_mask: bool = False,
+        y_node_norm_p=None,
+        y_node_norm_lambda=0,
         **kwargs,
     ) -> dict:
         """
@@ -392,6 +395,10 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                         # forward pass
                         loss = self.model.forward_loss(batch_step)
+
+                        # add norm
+                        if y_node_norm_p is not None:
+                            loss += y_node_norm_lambda * self.model.mod.getYNorm(y_node_norm_p)
 
                         # Backward
                         if use_amp:

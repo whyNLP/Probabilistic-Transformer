@@ -1,1 +1,1 @@
-from .token import MLMOneHotEmbeddings
+from .token import OneHotEmbeddings, MLMOneHotEmbeddings

@@ -3,6 +3,7 @@ import sys
 import shutil
 from pathlib import Path
 from typing import Union, List
+from collections import Counter
 
 from torch.utils.data import Dataset
 
@@ -94,6 +95,7 @@ class PlainTextCorpus(Corpus):
             skip_first_line: bool = False,
             in_memory: bool = True,
             autofind_splits: bool = True,
+            min_freq: int = 1,
             **corpusargs,
     ):
         # find train, dev and test files if not specified
@@ -127,7 +129,26 @@ class PlainTextCorpus(Corpus):
             skip_first_line=skip_first_line,
         ) if dev_file is not None else None
 
+        self.min_freq = min_freq
+
         super(PlainTextCorpus, self).__init__(train, dev, test, name=str(data_folder), **corpusargs)
+    
+    def make_tag_dictionary(self, tag_type: str) -> Dictionary:
+
+        if tag_type != 'mlm':
+            log.warn(f"'{tag_type}' tag type used. Currently we only support MLM task for plain text corpus.")
+
+        # Make the tag dictionary
+        tag_dictionary: Dictionary = Dictionary(add_unk=(self.min_freq>1))
+        tokens = []
+        for sentence in self.get_all_sentences():
+            for token in sentence.tokens:
+                tokens.append(token.text)
+        most_common = Counter(tokens)
+        tokens = sorted([token for token, freq in most_common.items() if freq >= self.min_freq])
+        for token in tokens:
+            tag_dictionary.add_item(token)
+        return tag_dictionary
 
 
 class StandardPTBCorpus(PlainTextCorpus):
@@ -179,5 +200,6 @@ class StandardPTBCorpus(PlainTextCorpus):
             encoding='utf-8',
             skip_first_line=False,
             in_memory=in_memory,
+            min_freq=1,
             **corpusargs,
         )
