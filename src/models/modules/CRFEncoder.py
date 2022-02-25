@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import opt_einsum as oe
+import math
 
 from deprecated import deprecated
 
@@ -361,7 +362,8 @@ class NewProbEncoder(nn.Module):
             norm: str = 'softmax', 
             dists: str = "",
             async_update: bool = False,
-            output_prob: bool = False
+            output_prob: bool = False,
+            use_td: str = 'no',
         ):
         """
         Initialize a basic Probabilistic Transformer encoder.
@@ -385,6 +387,14 @@ class NewProbEncoder(nn.Module):
         :param async_update: update the q values asyncronously (Y first, then Z).
         :param output_prob: If true, output a normalized probabilistic distribution. Otherwise
                             output unnormalized scores.
+        :param use_td: control tensor decomposition. Options:
+                         - 'no': no tensor decomposition;
+                         - 'uv:{rank}': each 'head' decompose to 2 matrices W = U @ V. Use a
+                           number to set the rank, e.g. 'uv:64';
+                         - 'uvw:{rank}': decompose to sum of product of 3 vectors 
+                           W = \sum U * V * W, where * is the outer product. Use a number to set
+                           the rank, e.g. 'uvw:64'.
+                       Default: 'no'.
         """
         super().__init__()
         self.d_model = d_model
@@ -399,6 +409,7 @@ class NewProbEncoder(nn.Module):
         self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
         self.async_update = async_update
         self.output_prob = output_prob
+        self.use_td = use_td.replace(' ', '')
 
         assert not self._dists or all([n>1 for n in self._dists]), "The minimum seperate point should be 2. See docs about distance."
 
@@ -409,8 +420,23 @@ class NewProbEncoder(nn.Module):
         else:
             raise ValueError("%s is not a normalization method." % self.norm)
 
-        self.ternary = nn.Parameter(torch.ones(2, len(self._dists)+1, self.d_model, self.d_model, self.d_label))
-        nn.init.normal_(self.ternary)
+        if self.use_td.startswith('uv:'):
+            rank = int(self.use_td.split(':')[-1])
+            self.U = nn.Parameter(torch.ones(2, len(self._dists)+1, self.d_model, rank, self.d_label))
+            self.V = nn.Parameter(torch.ones(2, len(self._dists)+1, self.d_model, rank, self.d_label))
+            nn.init.normal_(self.U, std = 1/math.sqrt(rank))
+            nn.init.normal_(self.V, std = 1/math.sqrt(rank))
+        elif self.use_td.startswith('uvw:'):
+            rank = int(self.use_td.split(':')[-1])
+            self.U = nn.Parameter(torch.Tensor(2, len(self._dists)+1, self.d_model, rank))
+            self.V = nn.Parameter(torch.Tensor(2, len(self._dists)+1, self.d_model, rank))
+            self.W = nn.Parameter(torch.Tensor(2, len(self._dists)+1, self.d_label, rank))
+            nn.init.normal_(self.U, std = 1/math.sqrt(rank))
+            nn.init.normal_(self.V, std = 1/math.sqrt(rank))
+            nn.init.normal_(self.W, std = 1/math.sqrt(rank))
+        else:
+            self.ternary = nn.Parameter(torch.ones(2, len(self._dists)+1, self.d_model, self.d_model, self.d_label))
+            nn.init.normal_(self.ternary)
 
     def forward(self, x, mask):
         batch_size, max_len, _ = x.shape
@@ -432,10 +458,18 @@ class NewProbEncoder(nn.Module):
         ## Unary score
         unary = x # (batch_size, max_len, d_model)
 
+        ## Recover ternary score
+        if self.use_td.startswith('uv:'):
+            ternary = oe.contract('tkadc,tkbdc->tkabc', *[self.U, self.V], backend='torch')
+        elif self.use_td.startswith('uvw:'):
+            ternary = oe.contract('tkad,tkbd,tkcd->tkabc', *[self.U, self.V, self.W], backend='torch')
+        else:
+            ternary = self.ternary
+
         ## Zero edge
         if self.zero_edge:
             with torch.no_grad():
-                self.ternary[..., 0] = 0
+                ternary[..., 0] = 0
 
         ## Init with unary score
         q_z = unary.clone()
@@ -461,8 +495,8 @@ class NewProbEncoder(nn.Module):
                 q_z = q_z*(~mask1d) 
                 
                 # Calculate 2nd message for different dists
-                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * self.ternary[1], distmask], backend='torch')
+                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
                 q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
@@ -479,10 +513,10 @@ class NewProbEncoder(nn.Module):
                 q_y.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch')
+                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
                 q_z = cache_qz * self.damping + (unary + second_order_message_F) * (1-self.damping) / self.regularize / self.d_model
@@ -503,13 +537,13 @@ class NewProbEncoder(nn.Module):
                 q_y.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch')
+                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch')
 
-                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * self.ternary[1], distmask], backend='torch')
+                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
                 q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
@@ -538,7 +572,7 @@ class NewProbEncoder(nn.Module):
                 print(self.norm_func(q_y))
                 print(torch.mean(self.norm_func(q_y)))
                 print("ternary:")
-                print(self.ternary)
+                print(ternary)
                 exit(0)
             self.cnt += 1
         
@@ -574,7 +608,8 @@ class NewProbEncoder(nn.Module):
             "norm": self.norm,
             "dists": self.dists,
             "async_update": self.async_update,
-            "output_prob": self.output_prob
+            "output_prob": self.output_prob,
+            'use_td': self.use_td
         }
         return model_hps
     
@@ -596,7 +631,8 @@ class NewProbEncoderDebug(nn.Module):
             norm: str = 'softmax', 
             dists: str = "",
             async_update: bool = False,
-            output_prob: bool = False
+            output_prob: bool = False,
+            use_td: str = 'no',
         ):
         """
         Initialize a basic Probabilistic Transformer encoder.
@@ -620,6 +656,14 @@ class NewProbEncoderDebug(nn.Module):
         :param async_update: update the q values asyncronously (Y first, then Z).
         :param output_prob: If true, output a normalized probabilistic distribution. Otherwise
                             output unnormalized scores.
+        :param use_td: control tensor decomposition. Options:
+                         - 'no': no tensor decomposition;
+                         - 'uv:{rank}': each 'head' decompose to 2 matrices W = U @ V. Use a
+                           number to set the rank, e.g. 'uv:64';
+                         - 'uvw:{rank}': decompose to sum of product of 3 vectors 
+                           W = \sum U * V * W, where * is the outer product. Use a number to set
+                           the rank, e.g. 'uvw:64'.
+                       Default: 'no'.
         """
         super().__init__()
         self.d_model = d_model
@@ -634,6 +678,7 @@ class NewProbEncoderDebug(nn.Module):
         self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
         self.async_update = async_update
         self.output_prob = output_prob
+        self.use_td = use_td.replace(' ', '')
 
         assert not self._dists or all([n>1 for n in self._dists]), "The minimum seperate point should be 2. See docs about distance."
 
@@ -644,10 +689,23 @@ class NewProbEncoderDebug(nn.Module):
         else:
             raise ValueError("%s is not a normalization method." % self.norm)
 
-        self.ternary = nn.Parameter(torch.ones(4, len(self._dists)+1, self.d_model, self.d_model, self.d_label))
-        nn.init.normal_(self.ternary)
-
-        # self.tempLinear = nn.Linear(self.d_model * self.d_label, self.d_model)
+        if self.use_td.startswith('uv:'):
+            rank = int(self.use_td.split(':')[-1])
+            self.U = nn.Parameter(torch.ones(2, len(self._dists)+1, self.d_model, rank, self.d_label))
+            self.V = nn.Parameter(torch.ones(2, len(self._dists)+1, self.d_model, rank, self.d_label))
+            nn.init.normal_(self.U, std = 1/math.sqrt(rank))
+            nn.init.normal_(self.V, std = 1/math.sqrt(rank))
+        elif self.use_td.startswith('uvw:'):
+            rank = int(self.use_td.split(':')[-1])
+            self.U = nn.Parameter(torch.Tensor(2, len(self._dists)+1, self.d_model, rank))
+            self.V = nn.Parameter(torch.Tensor(2, len(self._dists)+1, self.d_model, rank))
+            self.W = nn.Parameter(torch.Tensor(2, len(self._dists)+1, self.d_label, rank))
+            nn.init.normal_(self.U, std = 1/math.sqrt(rank))
+            nn.init.normal_(self.V, std = 1/math.sqrt(rank))
+            nn.init.normal_(self.W, std = 1/math.sqrt(rank))
+        else:
+            self.ternary = nn.Parameter(torch.ones(2, len(self._dists)+1, self.d_model, self.d_model, self.d_label))
+            nn.init.normal_(self.ternary)
 
     def forward(self, x, mask):
         batch_size, max_len, _ = x.shape
@@ -669,10 +727,18 @@ class NewProbEncoderDebug(nn.Module):
         ## Unary score
         unary = x # (batch_size, max_len, d_model)
 
+        ## Recover ternary score
+        if self.use_td.startswith('uv:'):
+            ternary = oe.contract('tkadc,tkbdc->tkabc', *[self.U, self.V], backend='torch')
+        elif self.use_td.startswith('uvw:'):
+            ternary = oe.contract('tkad,tkbd,tkcd->tkabc', *[self.U, self.V, self.W], backend='torch')
+        else:
+            ternary = self.ternary
+
         ## Zero edge
         if self.zero_edge:
             with torch.no_grad():
-                self.ternary[..., 0] = 0
+                ternary[..., 0] = 0
 
         ## Init with unary score
         q_z = unary.clone()
@@ -691,16 +757,15 @@ class NewProbEncoderDebug(nn.Module):
                 cache_qz = q_z.clone()
                 
                 # Normalize
-                # q_z = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z)
-                q_z = (1-self.stepsize) * cache_norm_qz + self.stepsize * (q_z)
+                q_z = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z)
                 cache_norm_qz = q_z.clone()
                 
                 # Apply mask
                 q_z = q_z*(~mask1d) 
                 
                 # Calculate 2nd message for different dists
-                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.ternary[1], distmask], backend='torch')
+                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
                 q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
@@ -709,8 +774,7 @@ class NewProbEncoderDebug(nn.Module):
                 cache_qy = q_y.clone()
                 
                 # Normalize
-                # q_y = (1-self.stepsize) * cache_norm_qy + self.stepsize * self.norm_func(q_y)
-                q_y = (1-self.stepsize) * cache_norm_qy + self.stepsize * F.softmax(q_y, dim=-2) # FIXME: attention!
+                q_y = (1-self.stepsize) * cache_norm_qy + self.stepsize * self.norm_func(q_y)
                 cache_norm_qy = q_y.clone()
                 
                 # Apply mask
@@ -718,21 +782,13 @@ class NewProbEncoderDebug(nn.Module):
                 q_y.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.ternary[2], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.ternary[3], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.ternary[2], distmask], backend='torch') + \
-                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.ternary[3], distmask], backend='torch')
-                
-                # # Calculate 2nd message for different dists
-                # second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zica', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                #                          oe.contract('zjb,zjic,kabc,kij->zica', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch') + \
-                #                          oe.contract('zjb,zjic,kbac,kji->zica', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                #                          oe.contract('zjb,zijc,kbac,kji->zica', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch')
-                
-                # second_order_message_F = self.tempLinear(second_order_message_F.reshape(batch_size, max_len, self.d_model*self.d_label))
+                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
-                q_z = cache_qz * self.damping + (unary + second_order_message_F) * (1-self.damping) / self.regularize # / self.d_model
+                q_z = cache_qz * self.damping + (unary + second_order_message_F) * (1-self.damping) / self.regularize / self.d_model
 
             else:
 
@@ -750,13 +806,13 @@ class NewProbEncoderDebug(nn.Module):
                 q_y.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch') + \
-                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * self.ternary[1], distmask], backend='torch')
+                second_order_message_F = oe.contract('zjb,zijc,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kabc,kij->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch') + \
+                                         oe.contract('zjb,zjic,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch')
 
-                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.d_model * self.ternary[0], distmask], backend='torch') + \
-                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * self.ternary[1], distmask], backend='torch')
+                second_order_message_G = oe.contract('zia,zjb,kabc,kij->zijc',*[q_z, q_z, self.d_model * ternary[0], distmask], backend='torch') + \
+                                         oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
                 q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
@@ -785,7 +841,7 @@ class NewProbEncoderDebug(nn.Module):
                 print(self.norm_func(q_y))
                 print(torch.mean(self.norm_func(q_y)))
                 print("ternary:")
-                print(self.ternary)
+                print(ternary)
                 exit(0)
             self.cnt += 1
         
@@ -821,7 +877,8 @@ class NewProbEncoderDebug(nn.Module):
             "norm": self.norm,
             "dists": self.dists,
             "async_update": self.async_update,
-            "output_prob": self.output_prob
+            "output_prob": self.output_prob,
+            'use_td': self.use_td
         }
         return model_hps
     
