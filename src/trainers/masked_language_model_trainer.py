@@ -104,8 +104,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         fix_train_mask: bool = False,
         fix_dev_mask: bool = False,
         fix_test_mask: bool = False,
-        y_node_norm_p=None,
-        y_node_norm_lambda=0,
+        ternary_norm_p=None,
+        ternary_norm_lambda=0,
         **kwargs,
     ) -> dict:
         """
@@ -397,8 +397,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
                         loss = self.model.forward_loss(batch_step)
 
                         # add norm
-                        if y_node_norm_p is not None:
-                            loss += y_node_norm_lambda * self.model.mod.getYNorm(y_node_norm_p)
+                        if ternary_norm_p is not None:
+                            loss += ternary_norm_lambda * self.model.mod.getTernaryNorm(ternary_norm_p)
 
                         # Backward
                         if use_amp:
