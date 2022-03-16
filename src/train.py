@@ -7,13 +7,14 @@ from typing import List
 import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("-c","--config", help="Determine the config file.", dest="config", type=str, default="config.toml")
+parser.add_argument("-f","--force", help="Force training to start, bypass the existence check.", dest="force", action='store_true')
 args = parser.parse_args()
 
 
 import utils
 config = utils.readconfig(args.config)
 base_path = Path(config["Basic"]["base_path"]) / config["Basic"]["folder_name"]
-if (base_path / "best-model.pt").exists() or (base_path / "config.toml").exists():
+if (not args.force) and ((base_path / "best-model.pt").exists() or (base_path / "config.toml").exists()):
     if input("WARNING: Overwrite existing model. Continue? y/[n]: ") != 'y':
         exit(-1)
 utils.saveconfig(args.config, base_path / "config.toml")
