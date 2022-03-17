@@ -253,6 +253,9 @@ class ProbEncoder(nn.Module):
                 print(ternary)
                 print(torch.mean(ternary))
                 print(torch.std(ternary))
+                print("max_len and total edges:")
+                print(max_len)
+                print((1-q_y[..., 0])[q_y[..., 0] > 0].sum())
                 exit(0)
             
             self.cnt += 1
