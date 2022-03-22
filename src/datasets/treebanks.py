@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import List, Union
+from collections import Counter
 import os
 
 from torch.utils.data.dataset import ConcatDataset, Subset
@@ -9,6 +10,7 @@ import flair
 from flair.data import (
     Sentence,
     Corpus,
+    Dictionary,
     Token,
     FlairDataset,
     randomly_split_into_two_datasets
@@ -22,7 +24,7 @@ from nltk.corpus.reader.bracket_parse import BracketParseCorpusReader
 log = logging.getLogger("flair")
 
 class PennTreebankCorpus(Corpus):
-    def __init__(self, splits: str = "2-21|22|23", base_path: Union[str, Path] = None, in_memory: bool = True):
+    def __init__(self, splits: str = "2-21|22|23", base_path: Union[str, Path] = None, in_memory: bool = True, **kwargs):
         """
         Instantiates a Corpus from original Penn Treebank 3 dataset.
 
@@ -35,6 +37,7 @@ class PennTreebankCorpus(Corpus):
         :param in_memory: If set to True, keeps full dataset in memory, otherwise does disk reads
         :return: a Corpus with annotated train, dev and test data
         """
+        self.__dict__.update(kwargs)
 
         if type(base_path) == str:
             base_path: Path = Path(base_path)
@@ -93,6 +96,30 @@ class PennTreebankCorpus(Corpus):
             name=str(data_folder),
             sample_missing_splits=False
         )
+
+    def make_tag_dictionary(self, tag_type: str) -> Dictionary:
+
+        if tag_type == 'mlm':
+
+            # Make the tag dictionary
+            tag_dictionary: Dictionary = Dictionary()
+            tokens = []
+            for sentence in self.train:
+                for token in sentence.tokens:
+                    tokens.append(token.text)
+            most_common = Counter(tokens)
+            tokens = sorted([token for token, freq in most_common.items() if freq >= self.min_freq])
+            for token in tokens:
+                tag_dictionary.add_item(token)
+            return tag_dictionary
+        
+        elif tag_type == 'pos':
+
+            return super().make_label_dictionary(tag_type)
+        
+        else:
+
+            return super().make_tag_dictionary(tag_type)
 
 class PennTreebankDataset(FlairDataset):
     def __init__(self, path_to_mrg_folder: Union[str, Path], fileids: Union[List, str] = ".*", in_memory: bool = True):

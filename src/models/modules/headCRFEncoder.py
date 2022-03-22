@@ -16,26 +16,34 @@ class HeadProbEncoder(nn.Module):
             d_model: int = 32, 
             n_head: int = 10, 
             n_iter: int = 4, 
-            damping: float = 0, 
-            stepsize: float = 1, 
-            regularize: float = 1,
+            damping_H: float = 0, 
+            damping_Z: float = 0, 
+            stepsize_H: float = 1, 
+            stepsize_Z: float = 1, 
+            regularize_F: float = 1,
+            regularize_G: float = 1,
             norm: str = 'softmax', 
             dists: str = "",
             async_update: bool = True,
             output_prob: bool = False,
             use_td: str = 'no',
             dropout: float = 0,
-            block_msg: bool = True
+            block_msg: bool = False
         ):
         """
         Initialize a basic Probabilistic Transformer encoder.
         :param d_model: dimensions of Z nodes.
         :param n_head: number of heads.
         :param n_iter: number of iterations.
-        :param damping: damping of update. 0 means no damping is applied.
-        :param stepsize: step size of update. 1 means full update is applied.
-        :param regularize: regularization for MFVI. See 'Regularized Frank-Wolfe for Dense CRFs: 
-                           GeneralizingMean Field and Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
+        :param damping_H: damping of H nodes update. 0 means no damping is applied.
+        :param damping_Z: damping of Z nodes update. 0 means no damping is applied.
+        :param stepsize_H: step size of H nodes update. 1 means full update is applied.
+        :param stepsize_Z: step size of Z nodes update. 1 means full update is applied.
+        :param regularize_F: regularization for message F.
+        :param regularize_G: regularization for message G.
+                'regularize_F' and 'regularize_G' are regularizations for MFVI. See 
+                'Regularized Frank-Wolfe for Dense CRFs: GeneralizingMean Field and 
+                Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
         :param norm: normalization method. Options: ['softmax', 'relu'], Default: 'softmax'.
         :param dists: distance pattern. Each distance group will use different factors. 
                       Dists should be groups of numbers seperated by ','. Each number represents
@@ -57,15 +65,18 @@ class HeadProbEncoder(nn.Module):
                            the rank, e.g. 'uvw:64'.
                        Default: 'no'.
         :param dropout: dropout for training. Default: 0.1.
-        :param block_msg: block the message passed to Z_j in factor (H_i=k, Z_i=a, Z_j=b).
+        :param block_msg: block the message passed to Z_j in factor (H_i=k, Z_i=a, Z_j=b). Default: False.
         """
         super().__init__()
         self.d_model = d_model
         self.n_head = n_head
         self.n_iter = n_iter
-        self.damping = damping
-        self.stepsize = stepsize
-        self.regularize = regularize
+        self.damping_H = damping_H
+        self.damping_Z = damping_Z
+        self.stepsize_H = stepsize_H
+        self.stepsize_Z = stepsize_Z
+        self.regularize_F = regularize_F
+        self.regularize_G = regularize_G
         self.norm = norm
         self.dists = dists
         self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
@@ -151,24 +162,24 @@ class HeadProbEncoder(nn.Module):
                 cache_qz = q_z.clone()
                 
                 # Normalize
-                q_z = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z)
+                q_z = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z)
                 cache_norm_qz = q_z.clone()
                 
                 # Apply mask
                 q_z = q_z*(~mask1d) 
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, self.d_model * ternary, distmask], backend='torch')
+                second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, ternary, distmask], backend='torch')
                 
                 # Update
-                q_h = cache_qh * self.damping + second_order_message_F * (1-self.damping) / self.regularize
+                q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_F * self.d_model
                 q_h = self.dropout_h(q_h)
             
                 ## Then update Z
                 cache_qh = q_h.clone()
                 
                 # Normalize
-                q_h = (1-self.stepsize) * cache_norm_qh + self.stepsize * self.norm_func(q_h)
+                q_h = (1-self.stepsize_H) * cache_norm_qh + self.stepsize_H * self.norm_func(q_h)
                 cache_norm_qh = q_h.clone()
                 
                 # Apply mask
@@ -176,12 +187,12 @@ class HeadProbEncoder(nn.Module):
                 q_h.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
-                second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, self.d_model * ternary, distmask], backend='torch')
+                second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, ternary, distmask], backend='torch')
                 if not self.block_msg:
-                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h, self.d_model * ternary, distmask], backend='torch')
+                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h, ternary, distmask], backend='torch')
                 
                 # Update
-                q_z = cache_qz * self.damping + (unary + second_order_message_G) * (1-self.damping) / self.regularize / self.d_model
+                q_z = cache_qz * self.damping_Z + (unary + second_order_message_G) * (1-self.damping_Z) / self.regularize_G
                 q_z = self.dropout_z(q_z)
 
             else:
@@ -189,8 +200,8 @@ class HeadProbEncoder(nn.Module):
                 cache_qz, cache_qh = q_z.clone(), q_h.clone()
                 
                 # Normalize
-                q_z, q_h = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z), \
-                           (1-self.stepsize) * cache_norm_qh + self.stepsize * self.norm_func(q_h)
+                q_z, q_h = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z), \
+                           (1-self.stepsize_H) * cache_norm_qh + self.stepsize_H * self.norm_func(q_h)
                 
                 cache_norm_qz, cache_norm_qh = q_z.clone(), q_h.clone()
                 
@@ -200,15 +211,15 @@ class HeadProbEncoder(nn.Module):
                 q_h.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, self.d_model * ternary, distmask], backend='torch')
+                second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, ternary, distmask], backend='torch')
                 
-                second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, self.d_model * ternary, distmask], backend='torch')
+                second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, ternary, distmask], backend='torch')
                 if not self.block_msg:
-                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h, self.d_model * ternary, distmask], backend='torch')
+                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h, ternary, distmask], backend='torch')
                 
                 # Update
-                q_h = cache_qh * self.damping + second_order_message_F * (1-self.damping) / self.regularize
-                q_z = cache_qz * self.damping + (unary + second_order_message_G) * (1-self.damping) / self.regularize / self.d_model
+                q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_F * self.d_model
+                q_z = cache_qz * self.damping_Z + (unary + second_order_message_G) * (1-self.damping_Z) / self.regularize_G 
                 q_h = self.dropout_h(q_h)
                 q_z = self.dropout_z(q_z)
                 
@@ -250,15 +261,15 @@ class HeadProbEncoder(nn.Module):
             
             self.cnt += 1
         
-        # Save the Q value for Y nodes
+        # Save the Q value for H nodes
         if not self.async_update:
-            q_h = (1-self.stepsize) * cache_norm_qh + self.stepsize * self.norm_func(q_h)
+            q_h = (1-self.stepsize_H) * cache_norm_qh + self.stepsize_H * self.norm_func(q_h)
             q_h = q_h - torch.diag_embed(q_h.diagonal(dim1=1, dim2=2), dim1=1, dim2=2)
             q_h.masked_fill_(mask2d, 0)
         self.q_h = q_h
 
         if self.output_prob:
-            q_z = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z)
+            q_z = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z)
             q_z = q_z*(~mask1d)
         return q_z
     
@@ -278,9 +289,12 @@ class HeadProbEncoder(nn.Module):
             "d_model": self.d_model,
             "n_head": self.n_head,
             "n_iter": self.n_iter,
-            "damping": self.damping,
-            "stepsize": self.stepsize,
-            "regularize": self.regularize,
+            "damping_H": self.damping_H,
+            "damping_Z": self.damping_Z,
+            "stepsize_H": self.stepsize_H,
+            "stepsize_Z": self.stepsize_Z,
+            "regularize_F": self.regularize_F,
+            "regularize_G": self.regularize_G,
             "norm": self.norm,
             "dists": self.dists,
             "async_update": self.async_update,

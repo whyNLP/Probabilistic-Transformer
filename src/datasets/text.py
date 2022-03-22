@@ -139,9 +139,9 @@ class PlainTextCorpus(Corpus):
             log.warn(f"'{tag_type}' tag type used. Currently we only support MLM task for plain text corpus.")
 
         # Make the tag dictionary
-        tag_dictionary: Dictionary = Dictionary(add_unk=(self.min_freq>1))
+        tag_dictionary: Dictionary = Dictionary()
         tokens = []
-        for sentence in self.get_all_sentences():
+        for sentence in self.train:
             for token in sentence.tokens:
                 tokens.append(token.text)
         most_common = Counter(tokens)

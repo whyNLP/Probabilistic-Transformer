@@ -17,9 +17,12 @@ class ProbEncoder(nn.Module):
             d_label: int = 32, 
             n_iter: int = 4, 
             zero_edge: bool = False, 
-            damping: float = 0, 
-            stepsize: float = 1, 
-            regularize: float = 1,
+            damping_Y: float = 0, 
+            damping_Z: float = 0, 
+            stepsize_Y: float = 1, 
+            stepsize_Z: float = 1, 
+            regularize_F: float = 1,
+            regularize_G: float = 1,
             norm: str = 'softmax', 
             dists: str = "",
             async_update: bool = True,
@@ -33,10 +36,15 @@ class ProbEncoder(nn.Module):
         :param d_label: dimensions of Y nodes.
         :param n_iter: number of iterations.
         :param zero_edge: whether enforce zero edge between Z nodes.
-        :param damping: damping of update. 0 means no damping is applied.
-        :param stepsize: step size of update. 1 means full update is applied.
-        :param regularize: regularization for MFVI. See 'Regularized Frank-Wolfe for Dense CRFs: 
-                           GeneralizingMean Field and Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
+        :param damping_Y: damping of Y nodes update. 0 means no damping is applied.
+        :param damping_Z: damping of Z nodes update. 0 means no damping is applied.
+        :param stepsize_Y: step size of Y nodes update. 1 means full update is applied.
+        :param stepsize_Z: step size of Z nodes update. 1 means full update is applied.
+        :param regularize_F: regularization for message F.
+        :param regularize_G: regularization for message G.
+                'regularize_F' and 'regularize_G' are regularizations for MFVI. See 
+                'Regularized Frank-Wolfe for Dense CRFs: GeneralizingMean Field and 
+                Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
         :param norm: normalization method. Options: ['softmax', 'relu'], Default: 'softmax'.
         :param dists: distance pattern. Each distance group will use different factors. 
                       Dists should be groups of numbers seperated by ','. Each number represents
@@ -64,9 +72,12 @@ class ProbEncoder(nn.Module):
         self.d_label = d_label
         self.n_iter = n_iter
         self.zero_edge = zero_edge
-        self.damping = damping
-        self.stepsize = stepsize
-        self.regularize = regularize
+        self.damping_Y = damping_Y
+        self.damping_Z = damping_Z
+        self.stepsize_Y = stepsize_Y
+        self.stepsize_Z = stepsize_Z
+        self.regularize_F = regularize_F
+        self.regularize_G = regularize_G
         self.norm = norm
         self.dists = dists
         self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
@@ -154,7 +165,7 @@ class ProbEncoder(nn.Module):
                 cache_qz = q_z.clone()
                 
                 # Normalize
-                q_z = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z)
+                q_z = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z)
                 cache_norm_qz = q_z.clone()
                 
                 # Apply mask
@@ -165,14 +176,14 @@ class ProbEncoder(nn.Module):
                                          oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
-                q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
+                q_y = cache_qy * self.damping_Y + second_order_message_G * (1-self.damping_Y) / self.regularize_G
                 q_y = self.dropout_y(q_y)
             
                 ## Then update Z
                 cache_qy = q_y.clone()
                 
                 # Normalize
-                q_y = (1-self.stepsize) * cache_norm_qy + self.stepsize * self.norm_func(q_y)
+                q_y = (1-self.stepsize_Y) * cache_norm_qy + self.stepsize_Y * self.norm_func(q_y)
                 cache_norm_qy = q_y.clone()
                 
                 # Apply mask
@@ -186,7 +197,7 @@ class ProbEncoder(nn.Module):
                                          oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
-                q_z = cache_qz * self.damping + (unary + second_order_message_F) * (1-self.damping) / self.regularize / self.d_model
+                q_z = cache_qz * self.damping_Z + (unary * 0 + second_order_message_F) * (1-self.damping_Z) / self.regularize_F / self.d_model
                 q_z = self.dropout_z(q_z)
 
             else:
@@ -194,8 +205,8 @@ class ProbEncoder(nn.Module):
                 cache_qz, cache_qy = q_z.clone(), q_y.clone()
                 
                 # Normalize
-                q_z, q_y = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z), \
-                           (1-self.stepsize) * cache_norm_qy + self.stepsize * self.norm_func(q_y)
+                q_z, q_y = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z), \
+                           (1-self.stepsize_Y) * cache_norm_qy + self.stepsize_Y * self.norm_func(q_y)
                 
                 cache_norm_qz, cache_norm_qy = q_z.clone(), q_y.clone()
                 
@@ -214,8 +225,8 @@ class ProbEncoder(nn.Module):
                                          oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
-                q_y = cache_qy * self.damping + second_order_message_G * (1-self.damping) / self.regularize
-                q_z = cache_qz * self.damping + (unary + second_order_message_F) * (1-self.damping) / self.regularize / self.d_model
+                q_y = cache_qy * self.damping_Y + second_order_message_G * (1-self.damping_Y) / self.regularize_G
+                q_z = cache_qz * self.damping_Z + (unary + second_order_message_F) * (1-self.damping_Z) / self.regularize_F / self.d_model
                 q_y = self.dropout_y(q_y)
                 q_z = self.dropout_z(q_z)
                 
@@ -262,13 +273,13 @@ class ProbEncoder(nn.Module):
         
         # Save the Q value for Y nodes
         if not self.async_update:
-            q_y = (1-self.stepsize) * cache_norm_qy + self.stepsize * self.norm_func(q_y)
+            q_y = (1-self.stepsize_Y) * cache_norm_qy + self.stepsize_Y * self.norm_func(q_y)
             q_y = q_y - torch.diag_embed(q_y.diagonal(dim1=1, dim2=2), dim1=1, dim2=2)
             q_y.masked_fill_(mask2d, 0)
         self.q_y = q_y
 
         if self.output_prob:
-            q_z = (1-self.stepsize) * cache_norm_qz + self.stepsize * self.norm_func(q_z)
+            q_z = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z)
             q_z = q_z*(~mask1d)
         return q_z
     
@@ -300,9 +311,12 @@ class ProbEncoder(nn.Module):
             "d_label": self.d_label,
             "n_iter": self.n_iter,
             "zero_edge": self.zero_edge,
-            "damping": self.damping,
-            "stepsize": self.stepsize,
-            "regularize": self.regularize,
+            "damping_Y": self.damping_Y,
+            "damping_Z": self.damping_Z,
+            "stepsize_Y": self.stepsize_Y,
+            "stepsize_Z": self.stepsize_Z,
+            "regularize_F": self.regularize_F,
+            "regularize_G": self.regularize_G,
             "norm": self.norm,
             "dists": self.dists,
             "async_update": self.async_update,
