@@ -123,7 +123,7 @@ class HeadProbEncoder(nn.Module):
         mask1d = mask != 0
         mask2d = mask1d.unsqueeze(-1) * mask1d.unsqueeze(-2)
         mask1d = ~mask1d.view(batch_size, max_len, 1)
-        mask2d = ~mask2d.view(batch_size, 1, max_len, max_len)
+        mask2d = ~mask2d.view(batch_size, 1, max_len, max_len).repeat_interleave(self.n_head,1)
 
         distmask = torch.ones(len(self._dists)+1, max_len, max_len, dtype=torch.float).triu(1).to(x.device)
         if len(self._dists) > 0: # At least two dist blocks
@@ -148,6 +148,11 @@ class HeadProbEncoder(nn.Module):
         ## Init with unary score
         q_z = unary.clone()
         q_h = torch.ones(batch_size, self.n_head, max_len, max_len).to(x.device)
+                
+        # Apply mask
+        q_z = q_z*(~mask1d)
+        q_h = q_h - torch.diag_embed(torch.ones_like(q_h[...,0])*(1e9), dim1=-1, dim2=-2)
+        q_h.masked_fill_(mask2d, -1e9)
 
         ## Initialization for async Y nodes
         cache_qh = q_h.clone()
@@ -174,6 +179,10 @@ class HeadProbEncoder(nn.Module):
                 # Update
                 q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_F * self.d_model
                 q_h = self.dropout_h(q_h)
+
+                # Apply mask
+                q_h = q_h - torch.diag_embed(torch.ones_like(q_h[...,0])*(1e9), dim1=-1, dim2=-2)
+                q_h.masked_fill_(mask2d, -1e9)
             
                 ## Then update Z
                 cache_qh = q_h.clone()
@@ -181,10 +190,6 @@ class HeadProbEncoder(nn.Module):
                 # Normalize
                 q_h = (1-self.stepsize_H) * cache_norm_qh + self.stepsize_H * self.norm_func(q_h)
                 cache_norm_qh = q_h.clone()
-                
-                # Apply mask
-                q_h = q_h - torch.diag_embed(q_h.diagonal(dim1=-1, dim2=-2), dim1=-1, dim2=-2)
-                q_h.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
                 second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, ternary, distmask], backend='torch')
@@ -197,6 +202,10 @@ class HeadProbEncoder(nn.Module):
 
             else:
 
+                # Apply mask
+                q_h = q_h - torch.diag_embed(torch.ones_like(q_h[...,0])*(1e9), dim1=-1, dim2=-2)
+                q_h.masked_fill_(mask2d, -1e9)
+
                 cache_qz, cache_qh = q_z.clone(), q_h.clone()
                 
                 # Normalize
@@ -207,8 +216,6 @@ class HeadProbEncoder(nn.Module):
                 
                 # Apply mask
                 q_z = q_z*(~mask1d) 
-                q_h = q_h - torch.diag_embed(q_h.diagonal(dim1=-1, dim2=-2), dim1=-1, dim2=-2)
-                q_h.masked_fill_(mask2d, 0)
                 
                 # Calculate 2nd message for different dists
                 second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, ternary, distmask], backend='torch')

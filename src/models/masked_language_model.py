@@ -338,7 +338,7 @@ class MaskedLanguageModel(CustomSequenceTagger):
                                 mini_batch_size=mini_batch_size,
                                 label_name='predicted',
                                 return_loss=True)
-            eval_loss += loss
+            eval_loss += loss * len(batch)
             batch_no += 1
 
             for sentence in batch:
@@ -368,7 +368,7 @@ class MaskedLanguageModel(CustomSequenceTagger):
             with open(Path(out_path), "w", encoding="utf-8") as outfile:
                 outfile.write("".join(lines))
 
-        eval_loss /= batch_no
+        eval_loss /= len(sentences)
 
         loss = eval_loss.item()
 
