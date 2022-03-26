@@ -178,7 +178,6 @@ class HeadProbEncoder(nn.Module):
                 
                 # Update
                 q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_F * self.d_model
-                q_h = self.dropout_h(q_h)
 
                 # Apply mask
                 q_h = q_h - torch.diag_embed(torch.ones_like(q_h[...,0])*(1e9), dim1=-1, dim2=-2)
@@ -189,6 +188,7 @@ class HeadProbEncoder(nn.Module):
                 
                 # Normalize
                 q_h = (1-self.stepsize_H) * cache_norm_qh + self.stepsize_H * self.norm_func(q_h)
+                q_h = self.dropout_h(q_h)
                 cache_norm_qh = q_h.clone()
                 
                 # Calculate 2nd message for different dists
