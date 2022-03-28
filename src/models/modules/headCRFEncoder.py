@@ -7,6 +7,7 @@ import math
 
 import os
 DEBUG=os.environ.get('DEBUG')
+DRAW=os.environ.get('DRAW')
 
 class HeadProbEncoder(nn.Module):
     """
@@ -159,7 +160,7 @@ class HeadProbEncoder(nn.Module):
 
         cache_norm_qz, cache_norm_qh = self.norm_func(q_z), self.norm_func(q_h)
 
-        for _ in range(self.n_iter):
+        for iteration in range(self.n_iter):
 
             if self.async_update:
 
@@ -229,6 +230,18 @@ class HeadProbEncoder(nn.Module):
                 q_z = cache_qz * self.damping_Z + (unary + second_order_message_G) * (1-self.damping_Z) / self.regularize_G 
                 q_h = self.dropout_h(q_h)
                 q_z = self.dropout_z(q_z)
+            
+            if DRAW:
+                if not iteration: codes = '% In the preamble:\n\\usepackage{tikz-dependency}\n\n% In the document:\n'
+                codes += '\\section{Iteration ' + str(iteration+1) + '}\n'
+                for b in range(batch_size):
+                    codes += '\\subsection{Batch ' + str(b+1) + '}\n'
+                    for h in range(self.n_head):
+                        codes += '\\subsubsection{Head ' + str(h+1) + '}\n'
+                        codes += self.draw_latex_dep(q_h[b,h])
+                if iteration + 1 == self.n_iter:
+                    print(codes)
+                    exit(0)
                 
         if DEBUG:
             if 'cnt' not in self.__dict__:
@@ -314,3 +327,36 @@ class HeadProbEncoder(nn.Module):
     
     def extra_repr(self) -> str:
         return ", ".join(["{}={}".format(k,v) for k,v in self._get_hyperparams().items()])
+
+    @classmethod
+    def draw_latex_dep(cls, heads):
+        """
+        Generate the latex codes to draw the dependency parse tree, given the
+        input head matrix.
+
+        :param: heads: Tensor with shape [length, length]. Should be normalized.
+        :rtype: str: Latex codes to draw the dependency parse tree.
+        """
+        ## Move the tensor to cpu
+        heads = heads.detach().cpu()
+        _, indices = heads.max(dim = 1)
+        length = len(heads)
+
+        ## The head code
+        s = """
+\\begin{dependency}[theme = simple]
+    \\begin{deptext}[column sep=1em]
+        """
+        s += ' \\& '.join([str(i+1) for i in range(length)])
+        s += """ \\\\
+    \\end{deptext}
+"""
+
+        ## The dependency edges
+        for i in range(length):
+            idx = indices[i].item()
+            s += '    \\depedge{{{}}}{{{}}}{{}}\n'.format(str(idx+1), str(i+1))
+        
+        s += '\\end{dependency}\n\n'
+
+        return s
