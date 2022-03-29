@@ -339,7 +339,7 @@ class HeadProbEncoder(nn.Module):
         """
         ## Move the tensor to cpu
         heads = heads.detach().cpu()
-        _, indices = heads.max(dim = 1)
+        confidence, indices = heads.max(dim = 1)
         length = len(heads)
 
         ## The head code
@@ -355,7 +355,8 @@ class HeadProbEncoder(nn.Module):
         ## The dependency edges
         for i in range(length):
             idx = indices[i].item()
-            s += '    \\depedge{{{}}}{{{}}}{{}}\n'.format(str(idx+1), str(i+1))
+            conf = confidence[i].item()
+            s += '    \\depedge{{{}}}{{{}}}{{{:.2f}}}\n'.format(str(idx+1), str(i+1), conf)
         
         s += '\\end{dependency}\n\n'
 
