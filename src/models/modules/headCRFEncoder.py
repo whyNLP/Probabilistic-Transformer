@@ -21,8 +21,8 @@ class HeadProbEncoder(nn.Module):
             damping_Z: float = 0, 
             stepsize_H: float = 1, 
             stepsize_Z: float = 1, 
-            regularize_F: float = 1,
-            regularize_G: float = 1,
+            regularize_H: float = 1,
+            regularize_Z: float = 1,
             norm: str = 'softmax', 
             dists: str = "",
             async_update: bool = True,
@@ -40,9 +40,9 @@ class HeadProbEncoder(nn.Module):
         :param damping_Z: damping of Z nodes update. 0 means no damping is applied.
         :param stepsize_H: step size of H nodes update. 1 means full update is applied.
         :param stepsize_Z: step size of Z nodes update. 1 means full update is applied.
-        :param regularize_F: regularization for message F.
-        :param regularize_G: regularization for message G.
-                'regularize_F' and 'regularize_G' are regularizations for MFVI. See 
+        :param regularize_H: regularization for updating H nodes.
+        :param regularize_Z: regularization for updating Z nodes.
+                'regularize_H' and 'regularize_Z' are regularizations for MFVI. See 
                 'Regularized Frank-Wolfe for Dense CRFs: GeneralizingMean Field and 
                 Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
         :param norm: normalization method. Options: ['softmax', 'relu'], Default: 'softmax'.
@@ -76,8 +76,8 @@ class HeadProbEncoder(nn.Module):
         self.damping_Z = damping_Z
         self.stepsize_H = stepsize_H
         self.stepsize_Z = stepsize_Z
-        self.regularize_F = regularize_F
-        self.regularize_G = regularize_G
+        self.regularize_H = regularize_H
+        self.regularize_Z = regularize_Z
         self.norm = norm
         self.dists = dists
         self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
@@ -178,7 +178,7 @@ class HeadProbEncoder(nn.Module):
                 second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, ternary, distmask], backend='torch')
                 
                 # Update
-                q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_F * self.d_model
+                q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_H * self.d_model
 
                 # Apply mask
                 q_h = q_h - torch.diag_embed(torch.ones_like(q_h[...,0])*(1e9), dim1=-1, dim2=-2)
@@ -198,7 +198,7 @@ class HeadProbEncoder(nn.Module):
                     second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h, ternary, distmask], backend='torch')
                 
                 # Update
-                q_z = cache_qz * self.damping_Z + (unary + second_order_message_G) * (1-self.damping_Z) / self.regularize_G
+                q_z = cache_qz * self.damping_Z + (unary + second_order_message_G) * (1-self.damping_Z) / self.regularize_Z
                 q_z = self.dropout_z(q_z)
 
             else:
@@ -226,8 +226,8 @@ class HeadProbEncoder(nn.Module):
                     second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h, ternary, distmask], backend='torch')
                 
                 # Update
-                q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_F * self.d_model
-                q_z = cache_qz * self.damping_Z + (unary + second_order_message_G) * (1-self.damping_Z) / self.regularize_G 
+                q_h = cache_qh * self.damping_H + second_order_message_F * (1-self.damping_H) / self.regularize_H * self.d_model
+                q_z = cache_qz * self.damping_Z + (unary + second_order_message_G) * (1-self.damping_Z) / self.regularize_Z 
                 q_h = self.dropout_h(q_h)
                 q_z = self.dropout_z(q_z)
             
@@ -313,8 +313,8 @@ class HeadProbEncoder(nn.Module):
             "damping_Z": self.damping_Z,
             "stepsize_H": self.stepsize_H,
             "stepsize_Z": self.stepsize_Z,
-            "regularize_F": self.regularize_F,
-            "regularize_G": self.regularize_G,
+            "regularize_H": self.regularize_H,
+            "regularize_Z": self.regularize_Z,
             "norm": self.norm,
             "dists": self.dists,
             "async_update": self.async_update,

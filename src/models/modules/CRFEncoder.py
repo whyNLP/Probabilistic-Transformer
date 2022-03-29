@@ -21,8 +21,8 @@ class ProbEncoder(nn.Module):
             damping_Z: float = 0, 
             stepsize_Y: float = 1, 
             stepsize_Z: float = 1, 
-            regularize_F: float = 1,
-            regularize_G: float = 1,
+            regularize_Y: float = 1,
+            regularize_Z: float = 1,
             norm: str = 'softmax', 
             dists: str = "",
             async_update: bool = True,
@@ -40,9 +40,9 @@ class ProbEncoder(nn.Module):
         :param damping_Z: damping of Z nodes update. 0 means no damping is applied.
         :param stepsize_Y: step size of Y nodes update. 1 means full update is applied.
         :param stepsize_Z: step size of Z nodes update. 1 means full update is applied.
-        :param regularize_F: regularization for message F.
-        :param regularize_G: regularization for message G.
-                'regularize_F' and 'regularize_G' are regularizations for MFVI. See 
+        :param regularize_Y: regularization for updating Y.
+        :param regularize_Z: regularization for updating Z.
+                'regularize_Z' and 'regularize_Y' are regularizations for MFVI. See 
                 'Regularized Frank-Wolfe for Dense CRFs: GeneralizingMean Field and 
                 Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
         :param norm: normalization method. Options: ['softmax', 'relu'], Default: 'softmax'.
@@ -76,8 +76,8 @@ class ProbEncoder(nn.Module):
         self.damping_Z = damping_Z
         self.stepsize_Y = stepsize_Y
         self.stepsize_Z = stepsize_Z
-        self.regularize_F = regularize_F
-        self.regularize_G = regularize_G
+        self.regularize_Y = regularize_Y
+        self.regularize_Z = regularize_Z
         self.norm = norm
         self.dists = dists
         self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
@@ -176,7 +176,7 @@ class ProbEncoder(nn.Module):
                                          oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
-                q_y = cache_qy * self.damping_Y + second_order_message_G * (1-self.damping_Y) / self.regularize_G
+                q_y = cache_qy * self.damping_Y + second_order_message_G * (1-self.damping_Y) / self.regularize_Y
                 q_y = self.dropout_y(q_y)
             
                 ## Then update Z
@@ -197,7 +197,7 @@ class ProbEncoder(nn.Module):
                                          oe.contract('zjb,zijc,kbac,kji->zia', *[q_z, q_y, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
-                q_z = cache_qz * self.damping_Z + (unary * 0 + second_order_message_F) * (1-self.damping_Z) / self.regularize_F / self.d_model
+                q_z = cache_qz * self.damping_Z + (unary * 0 + second_order_message_F) * (1-self.damping_Z) / self.regularize_Z / self.d_model
                 q_z = self.dropout_z(q_z)
 
             else:
@@ -225,8 +225,8 @@ class ProbEncoder(nn.Module):
                                          oe.contract('zia,zjb,kbac,kji->zijc',*[q_z, q_z, self.d_model * ternary[1], distmask], backend='torch')
                 
                 # Update
-                q_y = cache_qy * self.damping_Y + second_order_message_G * (1-self.damping_Y) / self.regularize_G
-                q_z = cache_qz * self.damping_Z + (unary + second_order_message_F) * (1-self.damping_Z) / self.regularize_F / self.d_model
+                q_y = cache_qy * self.damping_Y + second_order_message_G * (1-self.damping_Y) / self.regularize_Y
+                q_z = cache_qz * self.damping_Z + (unary + second_order_message_F) * (1-self.damping_Z) / self.regularize_Z / self.d_model
                 q_y = self.dropout_y(q_y)
                 q_z = self.dropout_z(q_z)
                 
@@ -315,8 +315,8 @@ class ProbEncoder(nn.Module):
             "damping_Z": self.damping_Z,
             "stepsize_Y": self.stepsize_Y,
             "stepsize_Z": self.stepsize_Z,
-            "regularize_F": self.regularize_F,
-            "regularize_G": self.regularize_G,
+            "regularize_Y": self.regularize_Y,
+            "regularize_Z": self.regularize_Z,
             "norm": self.norm,
             "dists": self.dists,
             "async_update": self.async_update,
