@@ -168,7 +168,7 @@ class HeadProbEncoder(nn.Module):
                 cache_qz = q_z.clone()
                 
                 # Normalize
-                q_z = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z)
+                q_z = ( (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z) ) if iteration else self.norm_func(q_z)
                 cache_norm_qz = q_z.clone()
                 
                 # Apply mask
@@ -188,7 +188,7 @@ class HeadProbEncoder(nn.Module):
                 cache_qh = q_h.clone()
                 
                 # Normalize
-                q_h = (1-self.stepsize_H) * cache_norm_qh + self.stepsize_H * self.norm_func(q_h)
+                q_h = ( (1-self.stepsize_H) * cache_norm_qh + self.stepsize_H * self.norm_func(q_h) ) if iteration else self.norm_func(q_h)
                 q_h = self.dropout_h(q_h)
                 cache_norm_qh = q_h.clone()
                 
