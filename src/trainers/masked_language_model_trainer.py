@@ -694,15 +694,31 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         return [self.mask_sentence(sentence, rand) for sentence in sentences]
 
     def mask_sentence(self, sentence: Sentence, rand=None):
-        new_sentence = Sentence()
-        for token in sentence:
-            if flip_coin(self.mask_rate, rand):
-                new_token = Token("<MASK>")
-                new_token.add_tag('mlm', token.text)
-            else:
-                new_token = Token(text = token.text)
-                new_token.add_tag('mlm', '<pad>')
-            new_sentence.add_token(new_token)
+        try: # accelerate by calculating tag idx in advance
+            new_sentence = Sentence()
+            tag_idx = []
+            for token in sentence:
+                if flip_coin(self.mask_rate, rand):
+                    new_token = Token("<MASK>")
+                    new_token.add_tag('mlm', token.text)
+                    tag_idx.append(self.model.tag_dictionary.get_idx_for_item(token.text))
+                else:
+                    new_token = Token(text = token.text)
+                    new_token.add_tag('mlm', '<pad>')
+                    tag_idx.append(-100)
+                new_sentence.add_token(new_token)
+            new_sentence.tag_idx = torch.tensor(tag_idx, device=flair.device)
+        except Exception:
+            new_sentence = Sentence()
+            tag_idx = []
+            for token in sentence:
+                if flip_coin(self.mask_rate, rand):
+                    new_token = Token("<MASK>")
+                    new_token.add_tag('mlm', token.text)
+                else:
+                    new_token = Token(text = token.text)
+                    new_token.add_tag('mlm', '<pad>')
+                new_sentence.add_token(new_token)
         return new_sentence
     
     def final_test(
