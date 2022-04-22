@@ -107,6 +107,7 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         ternary_norm_p=None,
         ternary_norm_lambda=0,
         use_bucket: bool = False,
+        late_save: int = 0,
         **kwargs,
     ) -> dict:
         """
@@ -146,6 +147,7 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         :param fix_train_mask: Fix the random generated mask for training set, so that they are the same for 
         all epochs.
         :param use_bucket: Gather sentence with the same length, to obtain better training speed.
+        :param late_save: Start to save the best model after n epochs.
         :return:
         """
 
@@ -629,12 +631,14 @@ class MaskedLanguageModelTrainer(ModelTrainer):
                     and not isinstance(lr_scheduler, OneCycleLR)
                     and current_score == lr_scheduler.best
                     and bad_epochs == 0
+                    and self.epoch >= late_save
                 ) or (
                     (not train_with_dev or anneal_with_restarts or anneal_with_prestarts)
                     and not param_selection_mode
                     and isinstance(lr_scheduler, OneCycleLR)
                     and current_score == lr_scheduler.best
                     and bad_epochs == 0
+                    and self.epoch >= late_save
                 ):
                     print("saving best model")
                     self.model.save(base_path / "best-model.pt")
