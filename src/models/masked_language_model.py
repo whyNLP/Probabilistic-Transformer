@@ -280,18 +280,22 @@ class MaskedLanguageModel(CustomSequenceTagger):
 
         lengths: List[int] = [len(sentence.tokens) for sentence in sentences]
 
-        pad_idx = len(self.tag_dictionary)+1
+        pad_idx = -100
 
         tag_list: List = []
-        for s_id, sentence in enumerate(sentences):
-            # get the tags in this sentence
-            tag_idx: List[int] = [
-                self.tag_dictionary.get_idx_for_item(token.get_tag(self.tag_type).value) if token.get_tag(self.tag_type).value != '<pad>' else pad_idx
-                for token in sentence
-            ]
-            # add tags as tensor
-            tag = torch.tensor(tag_idx, device=flair.device)
-            tag_list.append(tag)
+        if "tag_idx" in sentences[0].__dict__:
+            for sentence in sentences:
+                tag_list.append(sentence.tag_idx)
+        else:
+            for sentence in sentences:
+                # get the tags in this sentence
+                tag_idx: List[int] = [
+                    self.tag_dictionary.get_idx_for_item(token.get_tag(self.tag_type).value) if token.get_tag(self.tag_type).value != '<pad>' else pad_idx
+                    for token in sentence
+                ]
+                # add tags as tensor
+                tag = torch.tensor(tag_idx, device=flair.device)
+                tag_list.append(tag)
 
         score = 0
         for sentence_feats, sentence_tags, sentence_length in zip(

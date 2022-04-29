@@ -106,6 +106,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         fix_test_mask: bool = False,
         ternary_norm_p=None,
         ternary_norm_lambda=0,
+        use_bucket: bool = False,
+        late_save: int = 0,
         **kwargs,
     ) -> dict:
         """
@@ -144,6 +146,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         :param kwargs: Other arguments for the Optimizer
         :param fix_train_mask: Fix the random generated mask for training set, so that they are the same for 
         all epochs.
+        :param use_bucket: Gather sentence with the same length, to obtain better training speed.
+        :param late_save: Start to save the best model after n epochs.
         :return:
         """
 
@@ -356,9 +360,15 @@ class MaskedLanguageModelTrainer(ModelTrainer):
                     break
 
                 batch_loader = DataLoader(
-                    self.mask_dataset(train_data, fix_random=fix_train_mask),
+                    self.mask_dataset(
+                        train_data, 
+                        fix_random=fix_train_mask, 
+                        use_bucket=use_bucket if self.epoch > 1 else False, 
+                        shuffle=shuffle if self.epoch > 1 else False, 
+                        micro_batch_size=micro_batch_size
+                    ),
                     batch_size=mini_batch_size,
-                    shuffle=shuffle if self.epoch > 1 else False, # never shuffle the first epoch
+                    shuffle=shuffle if (self.epoch > 1 and not use_bucket) else False, # never shuffle the first epoch
                     num_workers=num_workers,
                     sampler=sampler,
                 )
@@ -461,7 +471,7 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_train:
                     train_eval_result, train_loss = self.model.evaluate(
-                        self.mask_dataset(self.corpus.train, fix_random=fix_train_mask),
+                        self.mask_dataset(self.corpus.train, fix_random=fix_train_mask, use_bucket=use_bucket),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         embedding_storage_mode=embeddings_storage_mode,
@@ -473,7 +483,7 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_train_part:
                     train_part_eval_result, train_part_loss = self.model.evaluate(
-                        self.mask_dataset(train_part, fix_random=fix_train_mask),
+                        self.mask_dataset(train_part, fix_random=fix_train_mask, use_bucket=use_bucket),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         embedding_storage_mode=embeddings_storage_mode,
@@ -487,7 +497,7 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_dev:
                     dev_eval_result, dev_loss = self.model.evaluate(
-                        self.mask_dataset(self.corpus.dev, fix_random=fix_dev_mask),
+                        self.mask_dataset(self.corpus.dev, fix_random=fix_dev_mask, use_bucket=use_bucket),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         out_path=base_path / "dev.tsv",
@@ -515,7 +525,7 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_test:
                     test_eval_result, test_loss = self.model.evaluate(
-                        self.mask_dataset(self.corpus.test, fix_random=fix_test_mask),
+                        self.mask_dataset(self.corpus.test, fix_random=fix_test_mask, use_bucket=use_bucket),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         out_path=base_path / "test.tsv",
@@ -621,12 +631,14 @@ class MaskedLanguageModelTrainer(ModelTrainer):
                     and not isinstance(lr_scheduler, OneCycleLR)
                     and current_score == lr_scheduler.best
                     and bad_epochs == 0
+                    and self.epoch >= late_save
                 ) or (
                     (not train_with_dev or anneal_with_restarts or anneal_with_prestarts)
                     and not param_selection_mode
                     and isinstance(lr_scheduler, OneCycleLR)
                     and current_score == lr_scheduler.best
                     and bad_epochs == 0
+                    and self.epoch >= late_save
                 ):
                     print("saving best model")
                     self.model.save(base_path / "best-model.pt")
@@ -677,32 +689,59 @@ class MaskedLanguageModelTrainer(ModelTrainer):
             "dev_loss_history": dev_loss_history,
         }
 
-    def mask_dataset(self, dataset: FlairDataset, fix_random: bool = False):
+    def mask_dataset(self, dataset: FlairDataset, fix_random: bool = False, use_bucket=False, shuffle=False, micro_batch_size=16):
         if fix_random:
-            rand = random.Random(313)
+            rand = random.Random(313) # My office is at 1A-313, SIST, ShanghaiTech University. A lucky number.
         else:
             rand = random
-        return SentenceDataset(self.mask_sentences(dataset, rand))
+        return SentenceDataset(self.mask_sentences(dataset, rand, use_bucket, shuffle, micro_batch_size))
 
-    def mask_sentences(self, sentences: List[Sentence], rand=None):
+    def mask_sentences(self, sentences: List[Sentence], rand=None, use_bucket=False, shuffle=False, micro_batch_size=16):
         """
         Return a list of brand new sentences with masks. 'mlm' tags indicate the mask status:
 
         Original:     I    went    to     <MASK>   yesterday    .
         'mlm' tag:  <pad>  <pad>  <pad>  Shanghai    <pad>    <pad>
         """
-        return [self.mask_sentence(sentence, rand) for sentence in sentences]
+        masked_sentences = [self.mask_sentence(sentence, rand) for sentence in sentences]
+        if use_bucket:
+            if shuffle:
+                masked_sentences.sort(key = lambda x: (len(x), random.random()))
+                grouped = [masked_sentences[i:i+micro_batch_size] for i in range(0,len(masked_sentences),micro_batch_size)]
+                grouped_chunked, last_group = grouped[:-1], grouped[-1]
+                random.shuffle(grouped_chunked)
+                masked_sentences = [x for l in grouped_chunked for x in l] + last_group
+            else:
+                masked_sentences.sort(key = lambda x: len(x))
+
+        return masked_sentences
 
     def mask_sentence(self, sentence: Sentence, rand=None):
-        new_sentence = Sentence()
-        for token in sentence:
-            if flip_coin(self.mask_rate, rand):
-                new_token = Token("<MASK>")
-                new_token.add_tag('mlm', token.text)
-            else:
-                new_token = Token(text = token.text)
-                new_token.add_tag('mlm', '<pad>')
-            new_sentence.add_token(new_token)
+        try: # accelerate by calculating tag idx in advance
+            new_sentence = Sentence()
+            tag_idx = []
+            for token in sentence:
+                if flip_coin(self.mask_rate, rand):
+                    new_token = Token("<MASK>")
+                    new_token.add_tag('mlm', token.text)
+                    tag_idx.append(self.model.tag_dictionary.get_idx_for_item(token.text))
+                else:
+                    new_token = Token(text = token.text)
+                    new_token.add_tag('mlm', '<pad>')
+                    tag_idx.append(-100)
+                new_sentence.add_token(new_token)
+            new_sentence.tag_idx = torch.tensor(tag_idx, device=flair.device)
+        except Exception:
+            new_sentence = Sentence()
+            tag_idx = []
+            for token in sentence:
+                if flip_coin(self.mask_rate, rand):
+                    new_token = Token("<MASK>")
+                    new_token.add_tag('mlm', token.text)
+                else:
+                    new_token = Token(text = token.text)
+                    new_token.add_tag('mlm', '<pad>')
+                new_sentence.add_token(new_token)
         return new_sentence
     
     def final_test(

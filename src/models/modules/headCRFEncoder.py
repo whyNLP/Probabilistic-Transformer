@@ -117,6 +117,19 @@ class HeadProbEncoder(nn.Module):
         self.dropout_h = nn.Dropout(p = dropout)
         self.dropout_z = nn.Dropout(p = dropout)
 
+        ## Build dist mask in advance. This may accelerate the forward process.
+        ## Pre-defined max length. If exceeded, calculate during the forward process.
+        self.max_len = 150
+        distmask = torch.ones(len(self._dists)+1, self.max_len, self.max_len, dtype=torch.float).triu(1)
+        if len(self._dists) > 0: # At least two dist blocks
+            distmask[0] = distmask[0].tril(self._dists[0]-1)
+            for i in range(1, len(self._dists)):
+                ni_1, ni = self._dists[i-1], self._dists[i]
+                distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
+            distmask[-1] = distmask[-1].triu(self._dists[-1])
+        distmask = torch.cat((distmask, distmask.transpose(-2, -1)), dim=0)
+        self.distmask = distmask
+
     def forward(self, x, mask):
         batch_size, max_len, _ = x.shape
 
@@ -126,14 +139,17 @@ class HeadProbEncoder(nn.Module):
         mask1d = ~mask1d.view(batch_size, max_len, 1)
         mask2d = ~mask2d.view(batch_size, 1, max_len, max_len).repeat_interleave(self.n_head,1)
 
-        distmask = torch.ones(len(self._dists)+1, max_len, max_len, dtype=torch.float).triu(1).to(x.device)
-        if len(self._dists) > 0: # At least two dist blocks
-            distmask[0] = distmask[0].tril(self._dists[0]-1)
-            for i in range(1, len(self._dists)):
-                ni_1, ni = self._dists[i-1], self._dists[i]
-                distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
-            distmask[-1] = distmask[-1].triu(self._dists[-1])
-        distmask = torch.cat((distmask, distmask.transpose(-2, -1)), dim=0)
+        if self.max_len < max_len:
+            distmask = torch.ones(len(self._dists)+1, max_len, max_len, dtype=torch.float).triu(1).to(x.device)
+            if len(self._dists) > 0: # At least two dist blocks
+                distmask[0] = distmask[0].tril(self._dists[0]-1)
+                for i in range(1, len(self._dists)):
+                    ni_1, ni = self._dists[i-1], self._dists[i]
+                    distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
+                distmask[-1] = distmask[-1].triu(self._dists[-1])
+            distmask = torch.cat((distmask, distmask.transpose(-2, -1)), dim=0)
+        else:
+            distmask = self.distmask[:, :max_len, :max_len].to(x.device)
 
         ## Unary score
         unary = x # (batch_size, max_len, d_model)

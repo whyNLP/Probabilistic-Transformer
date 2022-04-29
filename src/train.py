@@ -2,7 +2,7 @@ from collections import Counter
 import logging
 from pathlib import Path
 from typing import List
-
+import socket
 
 import argparse
 parser = argparse.ArgumentParser()
@@ -46,6 +46,8 @@ log = logging.getLogger("flair")
 log_handler = add_file_handler(log, base_path / "console.log")
 
 
+log.info("hostname: " + str(socket.gethostname()))
+
 # 1. what tag do we want to predict?
 tag_type = config["Corpus"].pop("tag_type")
 
@@ -53,6 +55,8 @@ tag_type = config["Corpus"].pop("tag_type")
 # 2. get the corpus
 corpus_name, corpus_config = list(config["Corpus"].items())[0]
 corpus: Corpus = utils.getattrs([datasets, flair.datasets], corpus_name)(**corpus_config)
+if "CorpusDownSample" in config:
+    corpus = corpus.downsample(**config["CorpusDownSample"])
 log.info(corpus)
 
 
