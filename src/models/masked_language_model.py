@@ -341,32 +341,35 @@ class MaskedLanguageModel(CustomSequenceTagger):
                                 embedding_storage_mode=embedding_storage_mode,
                                 mini_batch_size=mini_batch_size,
                                 label_name='predicted',
-                                return_loss=True)
+                                return_loss=True,
+                                obtain_labels = True if out_path else False)
             eval_loss += loss * len(batch)
             batch_no += 1
 
-            for sentence in batch:
+            if out_path:
 
-                for token in sentence:
-                    # add gold tag
-                    gold_tag = token.get_tag(self.tag_type).value
-                    y_true.append(labels.add_item(gold_tag))
+                for sentence in batch:
 
-                    # add predicted tag
-                    if wsd_evaluation:
-                        if gold_tag == 'O':
-                            predicted_tag = 'O'
+                    for token in sentence:
+                        # add gold tag
+                        gold_tag = token.get_tag(self.tag_type).value
+                        y_true.append(labels.add_item(gold_tag))
+
+                        # add predicted tag
+                        if wsd_evaluation:
+                            if gold_tag == 'O':
+                                predicted_tag = 'O'
+                            else:
+                                predicted_tag = token.get_tag('predicted').value
                         else:
                             predicted_tag = token.get_tag('predicted').value
-                    else:
-                        predicted_tag = token.get_tag('predicted').value
 
-                    y_pred.append(labels.add_item(predicted_tag))
+                        y_pred.append(labels.add_item(predicted_tag))
 
-                    # for file output
-                    lines.append(f'{token.text} {gold_tag} {predicted_tag}\n')
+                        # for file output
+                        lines.append(f'{token.text} {gold_tag} {predicted_tag}\n')
 
-                lines.append('\n')
+                    lines.append('\n')
 
         if out_path:
             with open(Path(out_path), "w", encoding="utf-8") as outfile:
@@ -398,3 +401,111 @@ class MaskedLanguageModel(CustomSequenceTagger):
             detailed_results=detailed_result,
         )
         return result, eval_loss
+    
+    def predict(
+            self,
+            sentences: Union[List[Sentence], Sentence],
+            mini_batch_size=32,
+            all_tag_prob: bool = False,
+            verbose: bool = False,
+            label_name: Optional[str] = None,
+            return_loss=False,
+            embedding_storage_mode="none",
+            obtain_labels: bool = False
+    ):
+        """
+        Predict sequence tags for Named Entity Recognition task
+        :param sentences: a Sentence or a List of Sentence
+        :param mini_batch_size: size of the minibatch, usually bigger is more rapid but consume more memory,
+        up to a point when it has no more effect.
+        :param all_tag_prob: True to compute the score for each tag on each token,
+        otherwise only the score of the best tag is returned
+        :param verbose: set to True to display a progress bar
+        :param return_loss: set to True to return loss
+        :param label_name: set this to change the name of the label type that is predicted
+        :param embedding_storage_mode: default is 'none' which is always best. Only set to 'cpu' or 'gpu' if
+        you wish to not only predict, but also keep the generated embeddings in CPU or GPU memory respectively.
+        'gpu' to store embeddings in GPU memory.
+        """
+        if label_name == None:
+            label_name = self.tag_type
+
+        with torch.no_grad():
+            if not sentences:
+                return sentences
+
+            if isinstance(sentences, Sentence):
+                sentences = [sentences]
+
+            # set context if not set already
+            previous_sentence = None
+            for sentence in sentences:
+                if sentence.is_context_set(): continue
+                sentence._previous_sentence = previous_sentence
+                sentence._next_sentence = None
+                if previous_sentence: previous_sentence._next_sentence = sentence
+                previous_sentence = sentence
+
+            # reverse sort all sequences by their length
+            rev_order_len_index = sorted(
+                range(len(sentences)), key=lambda k: len(sentences[k]), reverse=True
+            )
+
+            reordered_sentences: List[Union[Sentence, str]] = [
+                sentences[index] for index in rev_order_len_index
+            ]
+
+            dataloader = DataLoader(
+                dataset=SentenceDataset(reordered_sentences), batch_size=mini_batch_size
+            )
+
+            if self.use_crf:
+                transitions = self.transitions.detach().cpu().numpy()
+            else:
+                transitions = None
+
+            # progress bar for verbosity
+            if verbose:
+                dataloader = tqdm(dataloader)
+
+            overall_loss = 0
+            batch_no = 0
+            for batch in dataloader:
+
+                batch_no += 1
+
+                if verbose:
+                    dataloader.set_description(f"Inferencing on batch {batch_no}")
+
+                batch = self._filter_empty_sentences(batch)
+                # stop if all sentences are empty
+                if not batch:
+                    continue
+
+                feature = self.forward(batch)
+
+                if return_loss:
+                    overall_loss += self._calculate_loss(feature, batch)
+
+                if obtain_labels:
+                    tags, all_tags = self._obtain_labels(
+                        feature=feature,
+                        batch_sentences=batch,
+                        transitions=transitions,
+                        get_all_tags=all_tag_prob,
+                    )
+
+                    for (sentence, sent_tags) in zip(batch, tags):
+                        for (token, tag) in zip(sentence.tokens, sent_tags):
+                            token.add_tag_label(label_name, tag)
+
+                    # all_tags will be empty if all_tag_prob is set to False, so the for loop will be avoided
+                    for (sentence, sent_all_tags) in zip(batch, all_tags):
+                        for (token, token_all_tags) in zip(sentence.tokens, sent_all_tags):
+                            token.add_tags_proba_dist(label_name, token_all_tags)
+
+                # clearing token embeddings to save memory
+                store_embeddings(batch, storage_mode=embedding_storage_mode)
+
+            if return_loss:
+                return overall_loss / batch_no

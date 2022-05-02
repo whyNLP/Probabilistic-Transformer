@@ -10,7 +10,7 @@ import numpy as np
 
 import torch
 from torch.optim.sgd import SGD
-from torch.utils.data.dataset import ConcatDataset
+from torch.utils.data.dataset import Dataset, ConcatDataset, Subset
 
 from flair.datasets.base import SentenceDataset
 
@@ -40,7 +40,101 @@ import random
 log = logging.getLogger("flair")
 
 
-class MaskedLanguageModelTrainer(ModelTrainer):
+class MaskedTextDatasetWrapper(FlairDataset):
+    def __init__(
+            self, 
+            dataset: Dataset,
+            mask_rate: float = 0.3,
+            tag_dictionary = None,
+            fix_random: bool = False, 
+            bucket_size: Union[int, None] = 16,
+            shuffle: bool = False
+    ):
+        self.dataset = dataset
+        self.tag_dictionary = tag_dictionary
+        self.total_sentence_count = len(dataset)
+        self.lengths = [(i, len(sent)) for i, sent in enumerate(self.dataset)]
+        self.mask_rate = mask_rate
+        self.fix_random = fix_random
+        self.get_mapping(bucket_size, shuffle)
+    
+    def __len__(self):
+        return self.total_sentence_count
+
+    def __getitem__(self, index: int):
+        if self.fix_random:
+            rand = random.Random(313 + index) # My office is at 1A-313, SIST, ShanghaiTech University. A lucky number.
+        else:
+            rand = random
+        return self.mask_sentence(self.dataset[self.mapping[index]], rand)
+
+    def get_mapping(self, bucket_size: Union[int, None] = 16, shuffle: bool = False):
+        if bucket_size == True:
+            bucket_size = 16
+
+        lengths = self.lengths[:]
+        if bucket_size:
+            if shuffle:
+                lengths.sort(key = lambda x: (x[1], random.random()))
+                grouped = [lengths[i:i+bucket_size] for i in range(0,len(lengths),bucket_size)]
+                grouped_chunked, last_group = grouped[:-1], grouped[-1]
+                random.shuffle(grouped_chunked)
+                lengths = [x for l in grouped_chunked for x in l] + last_group
+            else:
+                lengths.sort(key = lambda x: x[1])
+        elif shuffle:
+            random.shuffle(lengths)
+        
+        self.mapping = [idx for idx, _ in lengths]
+        return self
+    
+    def mask_sentence(self, sentence: Sentence, rand=None):
+        try: # accelerate by calculating tag idx in advance
+            new_sentence = Sentence()
+            tag_idx = []
+            for token in sentence:
+                if flip_coin(self.mask_rate, rand):
+                    new_token = Token("<MASK>")
+                    new_token.add_tag('mlm', token.text)
+                    tag_idx.append(self.tag_dictionary.get_idx_for_item(token.text))
+                else:
+                    new_token = Token(text = token.text)
+                    new_token.add_tag('mlm', '<pad>')
+                    tag_idx.append(-100)
+                new_sentence.add_token(new_token)
+            new_sentence.tag_idx = torch.tensor(tag_idx, device=flair.device)
+        except Exception:
+            new_sentence = Sentence()
+            tag_idx = []
+            for token in sentence:
+                if flip_coin(self.mask_rate, rand):
+                    new_token = Token("<MASK>")
+                    new_token.add_tag('mlm', token.text)
+                else:
+                    new_token = Token(text = token.text)
+                    new_token.add_tag('mlm', '<pad>')
+                new_sentence.add_token(new_token)
+        return new_sentence
+
+    def is_in_memory(self) -> bool:
+
+        flair_dataset = self.dataset
+        while True:
+            if type(flair_dataset) is Subset:
+                flair_dataset = flair_dataset.dataset
+            elif type(flair_dataset) is ConcatDataset:
+                flair_dataset = flair_dataset.datasets[0]
+            else:
+                break
+
+        if type(flair_dataset) is list:
+            return True
+        elif isinstance(flair_dataset, FlairDataset) and flair_dataset.is_in_memory():
+            return True
+        return False
+
+
+class LazyMaskedLanguageModelTrainer(ModelTrainer):
     def __init__(
         self,
         model: flair.nn.Model,
@@ -312,6 +406,10 @@ class MaskedLanguageModelTrainer(ModelTrainer):
             for group in optimizer.param_groups:
                 if "momentum" in group:
                     momentum = group["momentum"]
+            
+            # cache the dev dataset to accelerate validation
+            wrapped_train = MaskedTextDatasetWrapper(train_data, self.mask_rate, self.model.tag_dictionary, fix_train_mask)
+            wrapped_dev = MaskedTextDatasetWrapper(self.corpus.dev, self.mask_rate, self.model.tag_dictionary, fix_dev_mask)
 
             for self.epoch in range(self.epoch + 1, max_epochs + 1):
                 log_line(log)
@@ -361,12 +459,9 @@ class MaskedLanguageModelTrainer(ModelTrainer):
                     break
 
                 batch_loader = DataLoader(
-                    self.mask_dataset(
-                        train_data, 
-                        fix_random=fix_train_mask, 
-                        use_bucket=use_bucket if self.epoch > 1 else False, 
-                        shuffle=shuffle if self.epoch > 1 else False, 
-                        micro_batch_size=micro_batch_size
+                    wrapped_train.get_mapping(
+                        bucket_size = micro_batch_size if self.epoch > 1 else False, 
+                        shuffle = shuffle if self.epoch > 1 else False
                     ),
                     batch_size=mini_batch_size,
                     shuffle=shuffle if (self.epoch > 1 and not use_bucket) else False, # never shuffle the first epoch
@@ -472,7 +567,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_train:
                     train_eval_result, train_loss = self.model.evaluate(
-                        self.mask_dataset(self.corpus.train, fix_random=fix_train_mask, use_bucket=use_bucket),
+                        MaskedTextDatasetWrapper(self.corpus.train, self.mask_rate, self.model.tag_dictionary, fix_train_mask, use_bucket),
+                        # self.mask_dataset(self.corpus.train, fix_random=fix_train_mask, use_bucket=use_bucket),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         embedding_storage_mode=embeddings_storage_mode,
@@ -484,7 +580,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_train_part:
                     train_part_eval_result, train_part_loss = self.model.evaluate(
-                        self.mask_dataset(train_part, fix_random=fix_train_mask, use_bucket=use_bucket),
+                        MaskedTextDatasetWrapper(train_part, self.mask_rate, self.model.tag_dictionary, fix_train_mask, use_bucket),
+                        # self.mask_dataset(train_part, fix_random=fix_train_mask, use_bucket=use_bucket),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         embedding_storage_mode=embeddings_storage_mode,
@@ -498,7 +595,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_dev:
                     dev_eval_result, dev_loss = self.model.evaluate(
-                        self.mask_dataset(self.corpus.dev, fix_random=fix_dev_mask, use_bucket=use_bucket),
+                        # self.mask_dataset(self.corpus.dev, fix_random=fix_dev_mask, use_bucket=use_bucket),
+                        wrapped_dev,
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         out_path=base_path / "dev.tsv" if output_prediction else None,
@@ -526,7 +624,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_test:
                     test_eval_result, test_loss = self.model.evaluate(
-                        self.mask_dataset(self.corpus.test, fix_random=fix_test_mask, use_bucket=use_bucket),
+                        MaskedTextDatasetWrapper(self.corpus.test, self.mask_rate, self.model.tag_dictionary, fix_test_mask, use_bucket),
+                        # self.mask_dataset(self.corpus.test, fix_random=fix_test_mask, use_bucket=use_bucket),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         out_path=base_path / "test.tsv" if output_prediction else None,
@@ -690,60 +789,60 @@ class MaskedLanguageModelTrainer(ModelTrainer):
             "dev_loss_history": dev_loss_history,
         }
 
-    def mask_dataset(self, dataset: FlairDataset, fix_random: bool = False, use_bucket=False, shuffle=False, micro_batch_size=16):
-        if fix_random:
-            rand = random.Random(313) # My office is at 1A-313, SIST, ShanghaiTech University. A lucky number.
-        else:
-            rand = random
-        return SentenceDataset(self.mask_sentences(dataset, rand, use_bucket, shuffle, micro_batch_size))
+    # def mask_dataset(self, dataset: FlairDataset, fix_random: bool = False, use_bucket=False, shuffle=False, micro_batch_size=16):
+    #     if fix_random:
+    #         rand = random.Random(313) # My office is at 1A-313, SIST, ShanghaiTech University. A lucky number.
+    #     else:
+    #         rand = random
+    #     return SentenceDataset(self.mask_sentences(dataset, rand, use_bucket, shuffle, micro_batch_size))
 
-    def mask_sentences(self, sentences: List[Sentence], rand=None, use_bucket=False, shuffle=False, micro_batch_size=16):
-        """
-        Return a list of brand new sentences with masks. 'mlm' tags indicate the mask status:
+    # def mask_sentences(self, sentences: List[Sentence], rand=None, use_bucket=False, shuffle=False, micro_batch_size=16):
+    #     """
+    #     Return a list of brand new sentences with masks. 'mlm' tags indicate the mask status:
 
-        Original:     I    went    to     <MASK>   yesterday    .
-        'mlm' tag:  <pad>  <pad>  <pad>  Shanghai    <pad>    <pad>
-        """
-        masked_sentences = [self.mask_sentence(sentence, rand) for sentence in sentences]
-        if use_bucket:
-            if shuffle:
-                masked_sentences.sort(key = lambda x: (len(x), random.random()))
-                grouped = [masked_sentences[i:i+micro_batch_size] for i in range(0,len(masked_sentences),micro_batch_size)]
-                grouped_chunked, last_group = grouped[:-1], grouped[-1]
-                random.shuffle(grouped_chunked)
-                masked_sentences = [x for l in grouped_chunked for x in l] + last_group
-            else:
-                masked_sentences.sort(key = lambda x: len(x))
+    #     Original:     I    went    to     <MASK>   yesterday    .
+    #     'mlm' tag:  <pad>  <pad>  <pad>  Shanghai    <pad>    <pad>
+    #     """
+    #     masked_sentences = [self.mask_sentence(sentence, rand) for sentence in sentences]
+    #     if use_bucket:
+    #         if shuffle:
+    #             masked_sentences.sort(key = lambda x: (len(x), random.random()))
+    #             grouped = [masked_sentences[i:i+micro_batch_size] for i in range(0,len(masked_sentences),micro_batch_size)]
+    #             grouped_chunked, last_group = grouped[:-1], grouped[-1]
+    #             random.shuffle(grouped_chunked)
+    #             masked_sentences = [x for l in grouped_chunked for x in l] + last_group
+    #         else:
+    #             masked_sentences.sort(key = lambda x: len(x))
 
-        return masked_sentences
+    #     return masked_sentences
 
-    def mask_sentence(self, sentence: Sentence, rand=None):
-        try: # accelerate by calculating tag idx in advance
-            new_sentence = Sentence()
-            tag_idx = []
-            for token in sentence:
-                if flip_coin(self.mask_rate, rand):
-                    new_token = Token("<MASK>")
-                    new_token.add_tag('mlm', token.text)
-                    tag_idx.append(self.model.tag_dictionary.get_idx_for_item(token.text))
-                else:
-                    new_token = Token(text = token.text)
-                    new_token.add_tag('mlm', '<pad>')
-                    tag_idx.append(-100)
-                new_sentence.add_token(new_token)
-            new_sentence.tag_idx = torch.tensor(tag_idx, device=flair.device)
-        except Exception:
-            new_sentence = Sentence()
-            tag_idx = []
-            for token in sentence:
-                if flip_coin(self.mask_rate, rand):
-                    new_token = Token("<MASK>")
-                    new_token.add_tag('mlm', token.text)
-                else:
-                    new_token = Token(text = token.text)
-                    new_token.add_tag('mlm', '<pad>')
-                new_sentence.add_token(new_token)
-        return new_sentence
+    # def mask_sentence(self, sentence: Sentence, rand=None):
+    #     try: # accelerate by calculating tag idx in advance
+    #         new_sentence = Sentence()
+    #         tag_idx = []
+    #         for token in sentence:
+    #             if flip_coin(self.mask_rate, rand):
+    #                 new_token = Token("<MASK>")
+    #                 new_token.add_tag('mlm', token.text)
+    #                 tag_idx.append(self.model.tag_dictionary.get_idx_for_item(token.text))
+    #             else:
+    #                 new_token = Token(text = token.text)
+    #                 new_token.add_tag('mlm', '<pad>')
+    #                 tag_idx.append(-100)
+    #             new_sentence.add_token(new_token)
+    #         new_sentence.tag_idx = torch.tensor(tag_idx, device=flair.device)
+    #     except Exception:
+    #         new_sentence = Sentence()
+    #         tag_idx = []
+    #         for token in sentence:
+    #             if flip_coin(self.mask_rate, rand):
+    #                 new_token = Token("<MASK>")
+    #                 new_token.add_tag('mlm', token.text)
+    #             else:
+    #                 new_token = Token(text = token.text)
+    #                 new_token.add_tag('mlm', '<pad>')
+    #             new_sentence.add_token(new_token)
+    #     return new_sentence
     
     def final_test(
         self, base_path: Union[Path, str], eval_mini_batch_size: int, num_workers: int = 8
@@ -760,7 +859,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
             self.model = self.model.load(base_path / "best-model.pt")
         
         test_results, test_loss = self.model.evaluate(
-            self.mask_dataset(self.corpus.test, fix_random=True),
+            MaskedTextDatasetWrapper(self.corpus.test, self.mask_rate, self.model.tag_dictionary, True),
+            # self.mask_dataset(self.corpus.test, fix_random=True),
             mini_batch_size=eval_mini_batch_size,
             num_workers=num_workers,
             out_path=base_path / "test.tsv",

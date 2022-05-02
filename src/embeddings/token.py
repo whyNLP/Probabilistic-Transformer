@@ -107,6 +107,7 @@ class MLMOneHotEmbeddings(_OneHotEmbeddings):
         self.init_strategy = init_strategy
         self.field = field
         self.instance_parameters = self.get_instance_parameters(locals=locals())
+        self.instance_parameters["corpus"] = corpus.name # FIXME: this is a quick fix for error in saving BLLIP.
 
         tokens = list(map((lambda s: s.tokens), corpus.train))
         tokens = [token for sublist in tokens for token in sublist]

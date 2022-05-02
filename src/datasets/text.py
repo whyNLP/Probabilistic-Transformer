@@ -1,11 +1,12 @@
 import random
+import os
 import sys
 import shutil
 from pathlib import Path
 from typing import Union, List
 from collections import Counter
 
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, ConcatDataset, Subset
 
 try:
     from apex import amp
@@ -13,7 +14,7 @@ except ImportError:
     amp = None
 
 import flair
-from flair.data import Corpus, Dictionary, Sentence
+from flair.data import Corpus, Dictionary, Sentence, FlairDataset
 from flair.models import LanguageModel
 from flair.optim import *
 from flair.training_utils import add_file_handler
@@ -23,7 +24,7 @@ from flair.datasets.base import find_train_dev_test_files
 log = logging.getLogger("flair")
 
 
-class PlainTextDataset(Dataset):
+class PlainTextDataset(FlairDataset):
     def __init__(
             self,
             path: Union[str, Path],
@@ -203,3 +204,58 @@ class StandardPTBCorpus(PlainTextCorpus):
             min_freq=1,
             **corpusargs,
         )
+
+
+class BLLIPTextCorpus(PlainTextCorpus):
+    def __init__(
+            self,
+            base_path: Union[str, Path] = None,
+            mode: str = 'XS',
+            min_freq: int = 1,
+            in_memory: bool = False,
+            **corpusargs,
+    ):
+        from .treebanks import BLLIPCorpus
+        from transformers import GPT2Tokenizer
+        from flair.embeddings.legacy import _build_token_subwords_mapping_gpt2
+        tokenizer = GPT2Tokenizer.from_pretrained("gpt2-medium")
+
+        class TokenizeDatasetWrapper(PlainTextDataset):
+            def __init__(self, dataset: Dataset):
+                self.dataset = dataset
+                self.total_sentence_count = len(dataset)
+
+            def __getitem__(self, index: int = 0):
+                sentence: Sentence = self.dataset[index]
+                _, tokenized_string = _build_token_subwords_mapping_gpt2(sentence, tokenizer)
+                subwords = tokenizer.tokenize(tokenized_string)
+                return Sentence(subwords)
+            
+            def is_in_memory(self) -> bool:
+
+                flair_dataset = self.dataset
+                while True:
+                    if type(flair_dataset) is Subset:
+                        flair_dataset = flair_dataset.dataset
+                    elif type(flair_dataset) is ConcatDataset:
+                        flair_dataset = flair_dataset.datasets[0]
+                    else:
+                        break
+
+                if type(flair_dataset) is list:
+                    return True
+                elif isinstance(flair_dataset, FlairDataset) and flair_dataset.is_in_memory():
+                    return True
+                return False
+
+        # this dataset name
+        dataset_name = self.__class__.__name__.lower()
+        
+        pos_corpus = BLLIPCorpus(base_path, mode, in_memory=in_memory)
+        train = TokenizeDatasetWrapper(pos_corpus.train)
+        dev = TokenizeDatasetWrapper(pos_corpus.dev)
+        test = TokenizeDatasetWrapper(pos_corpus.test)
+
+        self.min_freq = min_freq
+
+        super(PlainTextCorpus, self).__init__(train, dev, test, name=dataset_name, **corpusargs)
