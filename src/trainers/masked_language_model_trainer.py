@@ -104,8 +104,7 @@ class MaskedLanguageModelTrainer(ModelTrainer):
         fix_train_mask: bool = False,
         fix_dev_mask: bool = True,
         fix_test_mask: bool = True,
-        ternary_norm_p=None,
-        ternary_norm_lambda=0,
+        add_norm: dict = None,
         use_bucket: bool = False,
         late_save: int = 0,
         output_prediction: bool = False,
@@ -408,8 +407,9 @@ class MaskedLanguageModelTrainer(ModelTrainer):
                         loss = self.model.forward_loss(batch_step)
 
                         # add norm
-                        if ternary_norm_p is not None:
-                            loss += ternary_norm_lambda * self.model.mod.getTernaryNorm(ternary_norm_p)
+                        if add_norm:
+                            for k, v in add_norm.items():
+                                loss += v.get('lambda', 1) * self.model.mod.__class__.__dict__[k](self.model.mod, v.get('p', 1))
 
                         # Backward
                         if use_amp:
