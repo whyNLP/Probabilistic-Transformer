@@ -72,8 +72,7 @@ class CustomModelTrainer(ModelTrainer):
         eval_on_train_fraction=0.0,
         eval_on_train_shuffle=False,
         save_model_at_each_epoch=False,
-        y_node_norm_p=None,
-        y_node_norm_lambda=0,
+        add_norm: dict = None,
         **kwargs,
     ) -> dict:
         """
@@ -363,8 +362,9 @@ class CustomModelTrainer(ModelTrainer):
                         loss = self.model.forward_loss(batch_step)
 
                         # add norm
-                        if y_node_norm_p is not None:
-                            loss += y_node_norm_lambda * self.model.mod.getYNorm(y_node_norm_p)
+                        if add_norm:
+                            for k, v in add_norm.items():
+                                loss += v.get('lambda', 1) * getattr(self.model.mod, k)(v.get('p', 1))
 
                         # Backward
                         if use_amp:

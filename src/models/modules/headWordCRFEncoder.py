@@ -32,7 +32,8 @@ class HeadWordProbEncoder(nn.Module):
             output_prob: bool = False,
             use_td: str = 'no',
             dropout: float = 0,
-            block_msg: bool = False
+            block_msg: bool = False,
+            initialize_Z: bool = True
         ):
         """
         Initialize a basic Probabilistic Transformer encoder.
@@ -73,6 +74,7 @@ class HeadWordProbEncoder(nn.Module):
                        Default: 'no'.
         :param dropout: dropout for training. Default: 0.1.
         :param block_msg: block the message passed to Z_j in factor (H_i=k, Z_i=a, Z_j=b). Default: False.
+        :param initialize_Z: initialize masked Z nodes with X nodes. Default: True. 
         """
         super().__init__()
         self.d_model = d_model
@@ -95,6 +97,7 @@ class HeadWordProbEncoder(nn.Module):
         self.use_td = use_td.replace(' ', '')
         self.dropout = dropout
         self.block_msg = block_msg
+        self.initialize_Z = initialize_Z
 
         assert not self._dists or all([n>1 for n in self._dists]), "The minimum seperate point should be 2. See docs about distance."
 
@@ -169,8 +172,6 @@ class HeadWordProbEncoder(nn.Module):
         else:
             distmask = self.distmask[:, :max_len, :max_len].to(x.device)
 
-        # pre_allocated_ones = torch.ones(batch_size, max_len, self.d_model, dtype=torch.float).to(x.device)
-
         ## Unary score
         unary = x # (batch_size, max_len, d_model)
 
@@ -185,7 +186,13 @@ class HeadWordProbEncoder(nn.Module):
         ## Init with unary score
         q_h = torch.ones(batch_size, self.n_head, max_len, max_len).to(x.device)
         q_x = torch.ones(batch_size, max_len, vocab_size, dtype=torch.float).to(x.device)
-        q_z = unary.clone() * (1-m_mask).unsqueeze(-1) + oe.contract('zix,xa->zia', *[self.norm_func(q_x), embed_matrix], backend='torch') * m_mask.unsqueeze(-1)
+
+        if self.initialize_Z:
+            pre_allocated_ones = oe.contract('zix,xa->zia', *[self.norm_func(q_x), embed_matrix], backend='torch')
+        else:
+            pre_allocated_ones = torch.ones(batch_size, max_len, self.d_model, dtype=torch.float).to(x.device)
+        
+        q_z = unary.clone() * (1-m_mask).unsqueeze(-1) + pre_allocated_ones * m_mask.unsqueeze(-1)
                
         # Apply mask
         q_z = q_z*(~mask1d)
@@ -390,7 +397,8 @@ class HeadWordProbEncoder(nn.Module):
             "output_prob": self.output_prob,
             'use_td': self.use_td,
             "dropout": self.dropout,
-            "block_msg": self.block_msg
+            "block_msg": self.block_msg,
+            "initialize_Z": self.initialize_Z
         }
         return model_hps
     
@@ -484,7 +492,13 @@ class PseudoHeadWordProbEncoder(HeadWordProbEncoder):
         ## Init with unary score
         q_h = torch.ones(batch_size, self.n_head, max_len, max_len).to(x.device)
         q_x = torch.ones(batch_size, max_len, vocab_size, dtype=torch.float).to(x.device)
-        q_z = unary.clone() * (1-m_mask).unsqueeze(-1) + oe.contract('zix,xa->zia', *[self.norm_func(q_x), embed_matrix], backend='torch') * m_mask.unsqueeze(-1)
+
+        if self.initialize_Z:
+            pre_allocated_ones = oe.contract('zix,xa->zia', *[self.norm_func(q_x), embed_matrix], backend='torch')
+        else:
+            pre_allocated_ones = torch.ones(batch_size, max_len, self.d_model, dtype=torch.float).to(x.device)
+        
+        q_z = unary.clone() * (1-m_mask).unsqueeze(-1) + pre_allocated_ones * m_mask.unsqueeze(-1)
                
         # Apply mask
         q_z = q_z*(~mask1d)
@@ -655,44 +669,3 @@ class PseudoHeadWordProbEncoder(HeadWordProbEncoder):
         if self.output_prob:
             q_x = self.norm_func(q_x)
         return q_x
-
-    ## These codes below should not appear, but it will crash if they do not exist.
-    ## I have no idea why this would happen...
-    
-    def getTernaryNorm(self, p):
-        ## Recover ternary score
-        if self.use_td.startswith('uv:'):
-            ternary = oe.contract('kadc,kbdc->kabc', *[self.U, self.V], backend='torch')
-        elif self.use_td.startswith('uvw:'):
-            ternary = oe.contract('kad,kbd,kcd->kabc', *[self.U, self.V, self.W], backend='torch')
-        else:
-            ternary = self.ternary
-        
-        return ternary.norm(p=p)
-
-    def _get_hyperparams(self):
-        model_hps = {
-            "d_model": self.d_model,
-            "n_head": self.n_head,
-            "n_iter": self.n_iter,
-            "damping_H": self.damping_H,
-            "damping_Z": self.damping_Z,
-            "damping_X": self.damping_X,
-            "stepsize_H": self.stepsize_H,
-            "stepsize_Z": self.stepsize_Z,
-            "stepsize_X": self.stepsize_X,
-            "regularize_H": self.regularize_H,
-            "regularize_Z": self.regularize_Z,
-            "regularize_X": self.regularize_X,
-            "norm": self.norm,
-            "dists": self.dists,
-            "async_update": self.async_update,
-            "output_prob": self.output_prob,
-            'use_td': self.use_td,
-            "dropout": self.dropout,
-            "block_msg": self.block_msg
-        }
-        return model_hps
-    
-    def extra_repr(self) -> str:
-        return ", ".join(["{}={}".format(k,v) for k,v in self._get_hyperparams().items()])

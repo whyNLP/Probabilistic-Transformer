@@ -8,11 +8,6 @@ from collections import Counter
 
 from torch.utils.data import Dataset, ConcatDataset, Subset
 
-try:
-    from apex import amp
-except ImportError:
-    amp = None
-
 import flair
 from flair.data import Corpus, Dictionary, Sentence, FlairDataset
 from flair.models import LanguageModel
@@ -213,6 +208,7 @@ class BLLIPTextCorpus(PlainTextCorpus):
             mode: str = 'XS',
             min_freq: int = 1,
             in_memory: bool = False,
+            use_subtoken: bool = True,
             **corpusargs,
     ):
         from .treebanks import BLLIPCorpus
@@ -252,9 +248,9 @@ class BLLIPTextCorpus(PlainTextCorpus):
         dataset_name = self.__class__.__name__.lower()
         
         pos_corpus = BLLIPCorpus(base_path, mode, in_memory=in_memory)
-        train = TokenizeDatasetWrapper(pos_corpus.train)
-        dev = TokenizeDatasetWrapper(pos_corpus.dev)
-        test = TokenizeDatasetWrapper(pos_corpus.test)
+        train = TokenizeDatasetWrapper(pos_corpus.train) if use_subtoken else pos_corpus.train
+        dev = TokenizeDatasetWrapper(pos_corpus.dev) if use_subtoken else pos_corpus.dev
+        test = TokenizeDatasetWrapper(pos_corpus.test) if use_subtoken else pos_corpus.test
 
         self.min_freq = min_freq
 

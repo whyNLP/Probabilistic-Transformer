@@ -504,7 +504,7 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
                         # add norm
                         if add_norm:
                             for k, v in add_norm.items():
-                                loss += v.get('lambda', 1) * self.model.mod.__class__.__dict__[k](self.model.mod, v.get('p', 1))
+                                loss += v.get('lambda', 1) * getattr(self.model.mod, k)(v.get('p', 1))
 
                         # Backward
                         if use_amp:
