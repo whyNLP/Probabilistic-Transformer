@@ -28,7 +28,7 @@ class OneHotEmbeddings(_OneHotEmbeddings):
         :param embedding_length: dimensionality of the trainable embedding layer
         :param min_freq: minimum frequency of a word to become part of the vocabulary
         """
-        super(_OneHotEmbeddings).__init__()
+        super(_OneHotEmbeddings, self).__init__()
         self.name = "one-hot"
         self.static_embeddings = False
         self.min_freq = min_freq
