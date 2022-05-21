@@ -6,13 +6,10 @@ import time
 import datetime
 import sys
 import inspect
-import numpy as np
 
 import torch
 from torch.optim.sgd import SGD
-from torch.utils.data.dataset import Dataset, ConcatDataset, Subset
-
-from flair.datasets.base import SentenceDataset
+from torch.utils.data.dataset import ConcatDataset, Dataset, Subset
 
 try:
     from apex import amp
@@ -22,7 +19,7 @@ except ImportError:
 import flair
 import flair.nn
 from flair.datasets import DataLoader
-from flair.data import Corpus, FlairDataset, Sentence, Token
+from flair.optim import ExpAnnealLR
 from flair.training_utils import (
     init_output_file,
     WeightExtractor,
@@ -35,38 +32,28 @@ from flair.training_utils import (
 from torch.optim.lr_scheduler import OneCycleLR
 from flair.models import SequenceTagger
 from flair.trainers import ModelTrainer
+from flair.data import FlairDataset
 import random
 
 log = logging.getLogger("flair")
 
-
-class MaskedTextDatasetWrapper(FlairDataset):
+class BucketDatasetWrapper(FlairDataset):
     def __init__(
             self, 
             dataset: Dataset,
-            mask_rate: float = 0.3,
-            tag_dictionary = None,
-            fix_random: bool = False, 
             bucket_size: Union[int, None] = 16,
             shuffle: bool = False
     ):
         self.dataset = dataset
-        self.tag_dictionary = tag_dictionary
         self.total_sentence_count = len(dataset)
         self.lengths = [(i, len(sent)) for i, sent in enumerate(self.dataset)]
-        self.mask_rate = mask_rate
-        self.fix_random = fix_random
         self.get_mapping(bucket_size, shuffle)
     
     def __len__(self):
         return self.total_sentence_count
 
     def __getitem__(self, index: int):
-        if self.fix_random:
-            rand = random.Random(313 + index) # My office is at 1A-313, SIST, ShanghaiTech University. A lucky number.
-        else:
-            rand = random
-        return self.mask_sentence(self.dataset[self.mapping[index]], rand)
+        return self.dataset[self.mapping[index]]
 
     def get_mapping(self, bucket_size: Union[int, None] = 16, shuffle: bool = False):
         if bucket_size == True:
@@ -87,34 +74,6 @@ class MaskedTextDatasetWrapper(FlairDataset):
         
         self.mapping = [idx for idx, _ in lengths]
         return self
-    
-    def mask_sentence(self, sentence: Sentence, rand=None):
-        try: # accelerate by calculating tag idx in advance
-            new_sentence = Sentence()
-            tag_idx = []
-            for token in sentence:
-                if flip_coin(self.mask_rate, rand):
-                    new_token = Token("<MASK>")
-                    new_token.add_tag('mlm', token.text)
-                    tag_idx.append(self.tag_dictionary.get_idx_for_item(token.text))
-                else:
-                    new_token = Token(text = token.text)
-                    new_token.add_tag('mlm', '<pad>')
-                    tag_idx.append(-100)
-                new_sentence.add_token(new_token)
-            new_sentence.tag_idx = torch.tensor(tag_idx, device=flair.device)
-        except Exception:
-            new_sentence = Sentence()
-            tag_idx = []
-            for token in sentence:
-                if flip_coin(self.mask_rate, rand):
-                    new_token = Token("<MASK>")
-                    new_token.add_tag('mlm', token.text)
-                else:
-                    new_token = Token(text = token.text)
-                    new_token.add_tag('mlm', '<pad>')
-                new_sentence.add_token(new_token)
-        return new_sentence
 
     def is_in_memory(self) -> bool:
 
@@ -134,32 +93,7 @@ class MaskedTextDatasetWrapper(FlairDataset):
         return False
 
 
-class LazyMaskedLanguageModelTrainer(ModelTrainer):
-    def __init__(
-        self,
-        model: flair.nn.Model,
-        corpus: Corpus,
-        optimizer: torch.optim.Optimizer = SGD,
-        epoch: int = 0,
-        mask_rate: float = 0.3,
-        use_tensorboard: bool = False,
-    ):
-        """
-        Initialize a model trainer
-        :param model: The model that you want to train. The model should inherit from flair.nn.Model
-        :param corpus: The dataset used to train the model, should be of type Corpus
-        :param optimizer: The optimizer to use (typically SGD or Adam)
-        :param epoch: The starting epoch (normally 0 but could be higher if you continue training model)
-        :param mask_rate: The rate to mask words.
-        :param use_tensorboard: If True, writes out tensorboard information
-        """
-        self.model: flair.nn.Model = model
-        self.corpus: Corpus = corpus
-        self.optimizer: torch.optim.Optimizer = optimizer
-        self.epoch: int = epoch
-        self.mask_rate: float = mask_rate
-        self.use_tensorboard: bool = use_tensorboard
-    
+class BucketModelTrainer(ModelTrainer):
     def train(
         self,
         base_path: Union[Path, str],
@@ -178,7 +112,7 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
         train_with_test: bool = False,
         monitor_train: bool = False,
         monitor_test: bool = False,
-        embeddings_storage_mode: str = "none",
+        embeddings_storage_mode: str = "cpu",
         checkpoint: bool = False,
         save_final_model: bool = True,
         anneal_with_restarts: bool = False,
@@ -187,7 +121,6 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
         shuffle: bool = True,
         param_selection_mode: bool = False,
         write_weights: bool = False,
-        clip: float = 5.0,
         num_workers: int = 6,
         sampler=None,
         use_amp: bool = False,
@@ -195,13 +128,9 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
         eval_on_train_fraction=0.0,
         eval_on_train_shuffle=False,
         save_model_at_each_epoch=False,
-        fix_train_mask: bool = False,
-        fix_dev_mask: bool = True,
-        fix_test_mask: bool = True,
         add_norm: dict = None,
         use_bucket: bool = False,
         late_save: int = 0,
-        output_prediction: bool = False,
         **kwargs,
     ) -> dict:
         """
@@ -238,10 +167,6 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
         and kept fixed during training, otherwise it's sampled at beginning of each epoch
         :param save_model_at_each_epoch: If True, at each epoch the thus far trained model will be saved
         :param kwargs: Other arguments for the Optimizer
-        :param fix_train_mask: Fix the random generated mask for training set, so that they are the same for 
-        all epochs.
-        :param use_bucket: Gather sentence with the same length, to obtain better training speed.
-        :param late_save: Start to save the best model after n epochs.
         :return:
         """
 
@@ -405,10 +330,6 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
             for group in optimizer.param_groups:
                 if "momentum" in group:
                     momentum = group["momentum"]
-            
-            # cache the dev dataset to accelerate validation
-            wrapped_train = MaskedTextDatasetWrapper(train_data, self.mask_rate, self.model.tag_dictionary, fix_train_mask)
-            wrapped_dev = MaskedTextDatasetWrapper(self.corpus.dev, self.mask_rate, self.model.tag_dictionary, fix_dev_mask)
 
             for self.epoch in range(self.epoch + 1, max_epochs + 1):
                 log_line(log)
@@ -458,12 +379,13 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
                     break
 
                 batch_loader = DataLoader(
-                    wrapped_train.get_mapping(
-                        bucket_size = micro_batch_size if (self.epoch > 1 and use_bucket) else False, 
-                        shuffle = shuffle if self.epoch > 1 else False
+                    BucketDatasetWrapper(
+                        train_data, 
+                        mini_batch_size if (self.epoch > 1 and use_bucket) else False, 
+                        shuffle if self.epoch > 1 else False # never shuffle the first epoch
                     ),
                     batch_size=mini_batch_size,
-                    shuffle=shuffle if (self.epoch > 1 and not use_bucket) else False, # never shuffle the first epoch
+                    shuffle=False,
                     num_workers=num_workers,
                     sampler=sampler,
                 )
@@ -514,7 +436,7 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
                             loss.backward()
 
                     # do the optimizer step
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
                     optimizer.step()
                     
                     # do the scheduler step if one-cycle
@@ -567,8 +489,7 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_train:
                     train_eval_result, train_loss = self.model.evaluate(
-                        MaskedTextDatasetWrapper(self.corpus.train, self.mask_rate, self.model.tag_dictionary, fix_train_mask, use_bucket),
-                        # self.mask_dataset(self.corpus.train, fix_random=fix_train_mask, use_bucket=use_bucket),
+                        BucketDatasetWrapper(self.corpus.train, mini_batch_chunk_size if use_bucket else False),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         embedding_storage_mode=embeddings_storage_mode,
@@ -580,8 +501,7 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_train_part:
                     train_part_eval_result, train_part_loss = self.model.evaluate(
-                        MaskedTextDatasetWrapper(train_part, self.mask_rate, self.model.tag_dictionary, fix_train_mask, use_bucket),
-                        # self.mask_dataset(train_part, fix_random=fix_train_mask, use_bucket=use_bucket),
+                        BucketDatasetWrapper(train_part, mini_batch_chunk_size if use_bucket else False),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
                         embedding_storage_mode=embeddings_storage_mode,
@@ -595,11 +515,10 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_dev:
                     dev_eval_result, dev_loss = self.model.evaluate(
-                        # self.mask_dataset(self.corpus.dev, fix_random=fix_dev_mask, use_bucket=use_bucket),
-                        wrapped_dev,
+                        BucketDatasetWrapper(self.corpus.dev, mini_batch_chunk_size if use_bucket else False),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
-                        out_path=base_path / "dev.tsv" if output_prediction else None,
+                        out_path=base_path / "dev.tsv",
                         embedding_storage_mode=embeddings_storage_mode,
                     )
                     result_line += f"\t{dev_loss}\t{dev_eval_result.log_line}"
@@ -624,11 +543,10 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
 
                 if log_test:
                     test_eval_result, test_loss = self.model.evaluate(
-                        MaskedTextDatasetWrapper(self.corpus.test, self.mask_rate, self.model.tag_dictionary, fix_test_mask, use_bucket),
-                        # self.mask_dataset(self.corpus.test, fix_random=fix_test_mask, use_bucket=use_bucket),
+                        BucketDatasetWrapper(self.corpus.test, mini_batch_chunk_size if use_bucket else False),
                         mini_batch_size=mini_batch_chunk_size,
                         num_workers=num_workers,
-                        out_path=base_path / "test.tsv" if output_prediction else None,
+                        out_path=base_path / "test.tsv",
                         embedding_storage_mode=embeddings_storage_mode,
                     )
                     result_line += f"\t{test_loss}\t{test_eval_result.log_line}"
@@ -788,96 +706,3 @@ class LazyMaskedLanguageModelTrainer(ModelTrainer):
             "train_loss_history": train_loss_history,
             "dev_loss_history": dev_loss_history,
         }
-
-    # def mask_dataset(self, dataset: FlairDataset, fix_random: bool = False, use_bucket=False, shuffle=False, micro_batch_size=16):
-    #     if fix_random:
-    #         rand = random.Random(313) # My office is at 1A-313, SIST, ShanghaiTech University. A lucky number.
-    #     else:
-    #         rand = random
-    #     return SentenceDataset(self.mask_sentences(dataset, rand, use_bucket, shuffle, micro_batch_size))
-
-    # def mask_sentences(self, sentences: List[Sentence], rand=None, use_bucket=False, shuffle=False, micro_batch_size=16):
-    #     """
-    #     Return a list of brand new sentences with masks. 'mlm' tags indicate the mask status:
-
-    #     Original:     I    went    to     <MASK>   yesterday    .
-    #     'mlm' tag:  <pad>  <pad>  <pad>  Shanghai    <pad>    <pad>
-    #     """
-    #     masked_sentences = [self.mask_sentence(sentence, rand) for sentence in sentences]
-    #     if use_bucket:
-    #         if shuffle:
-    #             masked_sentences.sort(key = lambda x: (len(x), random.random()))
-    #             grouped = [masked_sentences[i:i+micro_batch_size] for i in range(0,len(masked_sentences),micro_batch_size)]
-    #             grouped_chunked, last_group = grouped[:-1], grouped[-1]
-    #             random.shuffle(grouped_chunked)
-    #             masked_sentences = [x for l in grouped_chunked for x in l] + last_group
-    #         else:
-    #             masked_sentences.sort(key = lambda x: len(x))
-
-    #     return masked_sentences
-
-    # def mask_sentence(self, sentence: Sentence, rand=None):
-    #     try: # accelerate by calculating tag idx in advance
-    #         new_sentence = Sentence()
-    #         tag_idx = []
-    #         for token in sentence:
-    #             if flip_coin(self.mask_rate, rand):
-    #                 new_token = Token("<MASK>")
-    #                 new_token.add_tag('mlm', token.text)
-    #                 tag_idx.append(self.model.tag_dictionary.get_idx_for_item(token.text))
-    #             else:
-    #                 new_token = Token(text = token.text)
-    #                 new_token.add_tag('mlm', '<pad>')
-    #                 tag_idx.append(-100)
-    #             new_sentence.add_token(new_token)
-    #         new_sentence.tag_idx = torch.tensor(tag_idx, device=flair.device)
-    #     except Exception:
-    #         new_sentence = Sentence()
-    #         tag_idx = []
-    #         for token in sentence:
-    #             if flip_coin(self.mask_rate, rand):
-    #                 new_token = Token("<MASK>")
-    #                 new_token.add_tag('mlm', token.text)
-    #             else:
-    #                 new_token = Token(text = token.text)
-    #                 new_token.add_tag('mlm', '<pad>')
-    #             new_sentence.add_token(new_token)
-    #     return new_sentence
-    
-    def final_test(
-        self, base_path: Union[Path, str], eval_mini_batch_size: int, num_workers: int = 8
-    ):
-        if type(base_path) is str:
-            base_path = Path(base_path)
-
-        log.info('-' * 100)
-        log.info("Testing using best model ...")
-
-        self.model.eval()
-
-        if (base_path / "best-model.pt").exists():
-            self.model = self.model.load(base_path / "best-model.pt")
-        
-        test_results, test_loss = self.model.evaluate(
-            MaskedTextDatasetWrapper(self.corpus.test, self.mask_rate, self.model.tag_dictionary, True),
-            # self.mask_dataset(self.corpus.test, fix_random=True),
-            mini_batch_size=eval_mini_batch_size,
-            num_workers=num_workers,
-            out_path=base_path / "test.tsv",
-            embedding_storage_mode="none",
-        )
-
-        log.info(test_results.log_header + '\t' + test_results.log_line)
-        log.info(test_results.detailed_results)
-        log.info('-' * 100)
-
-        # get and return the final test score of best model
-        final_score = test_results.main_score
-
-        return final_score
-
-
-def flip_coin(p: float, rand=None):
-    if rand is None:
-        rand = random
-    return rand.random() < p
