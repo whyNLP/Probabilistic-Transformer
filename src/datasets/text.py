@@ -174,6 +174,7 @@ class StandardPTBCorpus(PlainTextCorpus):
 
         # download data if necessary
         std_ptb_path = "https://github.com/wojzaremba/lstm/raw/master/data/"
+        # std_ptb_path = "https://raw.githubusercontents.com/wojzaremba/lstm/master/data/" # use proxy
 
         # download files if not present locally
         cached_path(f"{std_ptb_path}ptb.test.txt", data_folder / 'raw')

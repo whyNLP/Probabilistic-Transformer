@@ -301,6 +301,10 @@ class MaskedLanguageModel(CustomSequenceTagger):
         for sentence_feats, sentence_tags, sentence_length in zip(
                 features, tag_list, lengths
         ):
+            # skip if no masked word
+            if (sentence_tags==pad_idx).all().item():
+                continue
+
             sentence_feats = sentence_feats[:sentence_length]
             score += torch.nn.functional.cross_entropy(
                 sentence_feats, sentence_tags, weight=self.loss_weights, ignore_index=pad_idx

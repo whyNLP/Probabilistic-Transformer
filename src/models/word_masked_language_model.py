@@ -396,6 +396,10 @@ class WordMaskedLanguageModel(MaskedLanguageModel):
         for sentence_feats, sentence_tags, sentence_length in zip(
                 features, tag_list, lengths
         ):
+            # skip if no masked word
+            if (sentence_tags==pad_idx).all().item():
+                continue
+            
             sentence_feats = sentence_feats[:sentence_length]
             score += loss_func(
                 sentence_feats, sentence_tags

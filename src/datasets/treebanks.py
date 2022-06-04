@@ -52,6 +52,7 @@ class PennTreebankCorpus(Corpus):
 
         # download data if necessary
         web_path = "https://github.com/shrutirij/deeplearning-project/raw/master/data/PennTreebank/treebank_3_LDC99T42.tgz"
+        # web_path = "https://raw.githubusercontents.com/shrutirij/deeplearning-project/master/data/PennTreebank/treebank_3_LDC99T42.tgz" # use proxy
         
         def cached_dataset(idx):
 
