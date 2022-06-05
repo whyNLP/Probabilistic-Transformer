@@ -63,13 +63,11 @@ log.info(tag_dictionary)
 
 # 4. select embeddings
 embedding_types: List[TokenEmbeddings] = []
-if "OneHotEmbeddings" in config["Embeddings"]:
-    word_embedding = embeddings.OneHotEmbeddings(**(config["Embeddings"].pop("OneHotEmbeddings")), corpus=corpus)
-    word_embedding.instance_parameters["corpus"] = corpus_name # FIXME: this is a quick fix for error in saving conll03.
-    embedding_types.append(word_embedding)
-if "MLMOneHotEmbeddings" in config["Embeddings"]:
-    word_embedding = embeddings.MLMOneHotEmbeddings(**(config["Embeddings"].pop("MLMOneHotEmbeddings")), corpus=corpus)
-    embedding_types.append(word_embedding)
+corpus_embeddings = ("OneHotEmbeddings", "MLMOneHotEmbeddings", "AutoMLMOneHotEmbeddings")
+for name in corpus_embeddings:
+    if name in config["Embeddings"]:
+        word_embedding = getattr(embeddings, name)(**(config["Embeddings"].pop(name)), corpus=corpus)
+        embedding_types.append(word_embedding)
 for k, v in config["Embeddings"].items():
     word_embedding = utils.getattrs([embeddings, flair.embeddings], k)(**v)
     embedding_types.append(word_embedding)

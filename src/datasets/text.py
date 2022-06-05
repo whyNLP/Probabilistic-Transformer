@@ -1,6 +1,7 @@
 import random
 import os
 import sys
+import re
 import shutil
 from pathlib import Path
 from typing import Union, List
@@ -256,3 +257,111 @@ class BLLIPTextCorpus(PlainTextCorpus):
         self.min_freq = min_freq
 
         super(PlainTextCorpus, self).__init__(train, dev, test, name=dataset_name, **corpusargs)
+
+
+class UDGNBLLIPTextCorpus(PlainTextCorpus):
+    """
+    BLLIP corpus follow the UDGN setting (https://github.com/yikangshen/UDGN).
+    """
+
+    class DatasetWrapper(PlainTextDataset):
+
+        WORD_TAGS = [
+            'CC', 'CD', 'DT', 'EX', 'FW', 'IN', 'JJ', 'JJR', 'JJS', 'LS', 'MD', 'NN',
+            'NNS', 'NNP', 'NNPS', 'PDT', 'POS', 'PRP', 'PRP$', 'RB', 'RBR', 'RBS', 'RP',
+            'SYM', 'TO', 'UH', 'VB', 'VBD', 'VBG', 'VBN', 'VBP', 'VBZ', 'WDT', 'WP',
+            'WP$', 'WRB', 'AUX', 'AUXG'
+        ]
+
+        def __init__(self, dataset: Dataset):
+            self.dataset = dataset
+            self.total_sentence_count = len(dataset)
+
+        def __getitem__(self, index: int = 0):
+            sentence: Sentence = self.dataset[index]
+
+            words = []
+            for w in sentence:
+                tag = w.get_tag('pos').value
+                if tag in self.WORD_TAGS:
+                    w = w.text.lower()
+                    w = re.sub('[0-9]+', 'N', w)
+                    words.append(w)
+
+            return Sentence(words)
+        
+        def is_in_memory(self) -> bool:
+
+            flair_dataset = self.dataset
+            while True:
+                if type(flair_dataset) is Subset:
+                    flair_dataset = flair_dataset.dataset
+                elif type(flair_dataset) is ConcatDataset:
+                    flair_dataset = flair_dataset.datasets[0]
+                else:
+                    break
+
+            if type(flair_dataset) is list:
+                return True
+            elif isinstance(flair_dataset, FlairDataset) and flair_dataset.is_in_memory():
+                return True
+            return False
+
+    def __init__(
+            self,
+            base_path: Union[str, Path] = None,
+            mode: str = 'XS',
+            min_freq: int = 28,
+            in_memory: bool = False,
+            **corpusargs,
+    ):
+        from .treebanks import BLLIPCorpus
+
+        # this dataset name
+        dataset_name = self.__class__.__name__.lower()
+        
+        pos_corpus = BLLIPCorpus(base_path, mode, in_memory=in_memory)
+        train = self.DatasetWrapper(pos_corpus.train)
+        dev = self.DatasetWrapper(pos_corpus.dev)
+        test = self.DatasetWrapper(pos_corpus.test)
+
+        self.min_freq = min_freq
+
+        super(PlainTextCorpus, self).__init__(train, dev, test, name=dataset_name, **corpusargs)
+    
+    def make_tag_dictionary(self, tag_type: str) -> Dictionary:
+
+        # this dataset name
+        dataset_name = self.__class__.__name__.lower()
+        cache_path = Path(flair.cache_root) / "datasets" / dataset_name
+        file_name = f"tagset-{self.min_freq}.pt"
+
+        if (cache_path / file_name).exists():
+            return Dictionary.load_from_file(cache_path / file_name)
+
+        from .treebanks import BLLIPCorpus
+        from tqdm import tqdm
+
+        log.info("Building BLLIPS tag set using LG size...")
+        if tag_type != 'mlm':
+            log.warn(f"'{tag_type}' tag type used. Currently we only support MLM task for plain text corpus.")
+
+        pos_corpus = BLLIPCorpus(None, 'LG', in_memory=False)
+        train_set = self.DatasetWrapper(pos_corpus.train)
+
+        # Make the tag dictionary
+        tag_dictionary: Dictionary = Dictionary()
+        tokens = []
+        for sentence in tqdm(train_set, leave=False):
+            for token in sentence.tokens:
+                tokens.append(token.text)
+        most_common = Counter(tokens)
+        tokens = sorted([token for token, freq in most_common.items() if freq >= self.min_freq])
+        for token in tokens:
+            tag_dictionary.add_item(token)
+
+        log.info("Tag set loaded.")
+        os.makedirs(cache_path, exist_ok=True)
+        tag_dictionary.save(cache_path / file_name)
+
+        return tag_dictionary

@@ -35,6 +35,7 @@ class OneHotEmbeddings(_OneHotEmbeddings):
         self.init_strategy = init_strategy
         self.field = field
         self.instance_parameters = self.get_instance_parameters(locals=locals())
+        self.instance_parameters["corpus"] = corpus.name # FIXME: this is a quick fix for error in saving conll03.
 
         tokens = list(map((lambda s: s.tokens), corpus.train))
         tokens = [token for sublist in tokens for token in sublist]
@@ -131,6 +132,59 @@ class MLMOneHotEmbeddings(_OneHotEmbeddings):
         for token in tokens:
             self.vocab_dictionary.add_item(token)
         self.vocab_dictionary.add_item("<MASK>")
+
+        # max_tokens = 500
+        self.__embedding_length = embedding_length
+
+        log.info(f"MLMOneHotEmbeddings: vocabulary size of {len(self.vocab_dictionary)}")
+
+        # model architecture
+        self.embedding_layer = torch.nn.Embedding(
+            len(self.vocab_dictionary), self.__embedding_length
+        )
+
+        if init_strategy is not None:
+            getattr(torch.nn.init, init_strategy)(self.embedding_layer.weight)
+
+        self.to(flair.device)
+
+    @property
+    def embedding_length(self) -> int:
+        return self.__embedding_length
+
+    def extra_repr(self):
+        return "min_freq={}, init_strategy={}".format(self.min_freq, str(self.init_strategy))
+
+class AutoMLMOneHotEmbeddings(_OneHotEmbeddings):
+    """One-hot encoded embeddings, vocab extracted from the corpus tag set."""
+
+    def __init__(
+            self,
+            corpus: Corpus,
+            embedding_length: int = 300,
+            with_mask: bool = True,
+            init_strategy: str = None
+    ):
+        """
+        Initializes one-hot encoded word embeddings and a trainable embedding layer
+        :param corpus: you need to pass a Corpus in order to construct the vocabulary
+        :param with_mask: add <MASK> token
+        :param embedding_length: dimensionality of the trainable embedding layer
+        """
+        super(_OneHotEmbeddings, self).__init__()
+        self.name = "auto-one-hot-mlm"
+        self.static_embeddings = False
+        self.min_freq = corpus.min_freq
+        self.init_strategy = init_strategy
+        self.field = 'text'
+        self.with_mask = with_mask
+        self.instance_parameters = self.get_instance_parameters(locals=locals())
+        self.instance_parameters["corpus"] = corpus.name # FIXME: this is a quick fix for error in saving BLLIP.
+
+        self.vocab_dictionary = corpus.make_tag_dictionary('mlm')
+
+        if with_mask:
+            self.vocab_dictionary.add_item("<MASK>")
 
         # max_tokens = 500
         self.__embedding_length = embedding_length

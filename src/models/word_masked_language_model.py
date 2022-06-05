@@ -398,6 +398,7 @@ class WordMaskedLanguageModel(MaskedLanguageModel):
         ):
             # skip if no masked word
             if (sentence_tags==pad_idx).all().item():
+                score += torch.tensor(0., requires_grad=True, device=flair.device)
                 continue
             
             sentence_feats = sentence_feats[:sentence_length]
