@@ -722,7 +722,8 @@ class MaskedLanguageModelTrainer(ModelTrainer):
             new_sentence = Sentence()
             tag_idx = []
             for token in sentence:
-                if flip_coin(self.mask_rate, rand):
+                # unknown words are not allowed to be masked.
+                if flip_coin(self.mask_rate, rand) and self.model.tag_dictionary.get_idx_for_item(token.text) != 0:
                     new_token = Token("<MASK>")
                     new_token.add_tag('mlm', token.text)
                     tag_idx.append(self.model.tag_dictionary.get_idx_for_item(token.text))

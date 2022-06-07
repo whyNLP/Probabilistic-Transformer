@@ -373,11 +373,10 @@ class WordMaskedLanguageModel(MaskedLanguageModel):
         pad_idx = -100
 
         tag_list: List = []
-        if "tag_idx" in sentences[0].__dict__:
-            for sentence in sentences:
+        for sentence in sentences:
+            if "tag_idx" in sentence.__dict__:
                 tag_list.append(sentence.tag_idx)
-        else:
-            for sentence in sentences:
+            else:
                 # get the tags in this sentence
                 tag_idx: List[int] = [
                     self.tag_dictionary.get_idx_for_item(token.get_tag(self.tag_type).value) if token.get_tag(self.tag_type).value != '<pad>' else pad_idx
