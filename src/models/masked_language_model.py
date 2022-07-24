@@ -296,6 +296,23 @@ class MaskedLanguageModel(CustomSequenceTagger):
                 tag = torch.tensor(tag_idx, device=flair.device)
                 tag_list.append(tag)
 
+        # ## Sentence-wise average 
+        # score = 0
+        # for sentence_feats, sentence_tags, sentence_length in zip(
+        #         features, tag_list, lengths
+        # ):
+        #     # skip if no masked word
+        #     if (sentence_tags==pad_idx).all().item():
+        #         score += torch.tensor(0., requires_grad=True, device=flair.device)
+        #         continue
+
+        #     sentence_feats = sentence_feats[:sentence_length]
+        #     score += torch.nn.functional.cross_entropy(
+        #         sentence_feats, sentence_tags, weight=self.loss_weights, ignore_index=pad_idx
+        #     )
+        # score /= len(features)
+
+        ## Token-wise average 
         score = 0
         for sentence_feats, sentence_tags, sentence_length in zip(
                 features, tag_list, lengths
@@ -307,11 +324,30 @@ class MaskedLanguageModel(CustomSequenceTagger):
 
             sentence_feats = sentence_feats[:sentence_length]
             score += torch.nn.functional.cross_entropy(
-                sentence_feats, sentence_tags, weight=self.loss_weights, ignore_index=pad_idx
+                sentence_feats, sentence_tags, weight=self.loss_weights, ignore_index=pad_idx, reduction='sum'
             )
-        score /= len(features)
+        score /= max(1, self.count_masked_tokens(sentences))
 
         return score
+
+    def count_masked_tokens(
+            self, sentences: Union[List[Sentence], Dataset]
+    ) -> int:
+
+        counts = 0
+        for sentence in sentences:
+            if "tag_idx" in sentence.__dict__:
+                pad_idx = -100
+                counts += len(sentence) - sentence.tag_idx.cpu().numpy().tolist().count(pad_idx)
+            else:
+                # get the tags in this sentence
+                pads: int = [
+                    token.get_tag(self.tag_type).value
+                    for token in sentence
+                ].count('<pad>')
+                counts += len(sentence) - pads
+        
+        return counts
     
     def evaluate(
             self,
@@ -347,7 +383,8 @@ class MaskedLanguageModel(CustomSequenceTagger):
                                 label_name='predicted',
                                 return_loss=True,
                                 obtain_labels = True if out_path else False)
-            eval_loss += loss * len(batch)
+            # eval_loss += loss * len(batch)
+            eval_loss += loss * self.count_masked_tokens(batch)
             batch_no += 1
 
             if out_path:
@@ -379,7 +416,8 @@ class MaskedLanguageModel(CustomSequenceTagger):
             with open(Path(out_path), "w", encoding="utf-8") as outfile:
                 outfile.write("".join(lines))
 
-        eval_loss /= len(sentences)
+        # eval_loss /= len(sentence)
+        eval_loss /= max(1, self.count_masked_tokens(sentences))
 
         loss = eval_loss.item()
 

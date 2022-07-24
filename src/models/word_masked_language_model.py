@@ -386,10 +386,32 @@ class WordMaskedLanguageModel(MaskedLanguageModel):
                 tag = torch.tensor(tag_idx, device=flair.device)
                 tag_list.append(tag)
 
+        # ## Sentence-wise average 
+        # if self.module.get('output_prob', False):
+        #     loss_func = lambda input, target: torch.nn.functional.nll_loss(torch.log(input+1e-12), target, weight=self.loss_weights, ignore_index=pad_idx)
+        # else:
+        #     loss_func = lambda input, target: torch.nn.functional.cross_entropy(input, target, weight=self.loss_weights, ignore_index=pad_idx)
+
+        # score = 0
+        # for sentence_feats, sentence_tags, sentence_length in zip(
+        #         features, tag_list, lengths
+        # ):
+        #     # skip if no masked word
+        #     if (sentence_tags==pad_idx).all().item():
+        #         score += torch.tensor(0., requires_grad=True, device=flair.device)
+        #         continue
+            
+        #     sentence_feats = sentence_feats[:sentence_length]
+        #     score += loss_func(
+        #         sentence_feats, sentence_tags
+        #     )
+        # score /= len(features)
+
+        ## Token-wise average 
         if self.module.get('output_prob', False):
-            loss_func = lambda input, target: torch.nn.functional.nll_loss(torch.log(input+1e-12), target, weight=self.loss_weights, ignore_index=pad_idx)
+            loss_func = lambda input, target: torch.nn.functional.nll_loss(torch.log(input+1e-12), target, weight=self.loss_weights, ignore_index=pad_idx, reduction='sum')
         else:
-            loss_func = lambda input, target: torch.nn.functional.cross_entropy(input, target, weight=self.loss_weights, ignore_index=pad_idx)
+            loss_func = lambda input, target: torch.nn.functional.cross_entropy(input, target, weight=self.loss_weights, ignore_index=pad_idx, reduction='sum')
 
         score = 0
         for sentence_feats, sentence_tags, sentence_length in zip(
@@ -399,11 +421,11 @@ class WordMaskedLanguageModel(MaskedLanguageModel):
             if (sentence_tags==pad_idx).all().item():
                 score += torch.tensor(0., requires_grad=True, device=flair.device)
                 continue
-            
+
             sentence_feats = sentence_feats[:sentence_length]
             score += loss_func(
                 sentence_feats, sentence_tags
             )
-        score /= len(features)
+        score /= max(1, self.count_masked_tokens(sentences))
 
         return score
