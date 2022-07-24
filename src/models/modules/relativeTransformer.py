@@ -10,12 +10,22 @@ DRAW=os.environ.get('DRAW')
 if DRAW: from .recorder import HeadRecorder
 
 class MultiHeadAttention(nn.Module):
-    def __init__(self, d_model=256, n_head=4, d_qkv=32, dropout=0.1, **kwargs):
+    def __init__(self, d_model=256, n_head=4, d_qkv=32, dropout=0.1, e_length=5, mode="k", **kwargs):
         super().__init__()
         self.d_model = d_model
         self.n_head = n_head
         self.d_qkv = d_qkv
         self.dropout = dropout
+
+        # Positional embedding
+        self.e_length = e_length # relative positional embedding length
+        self.mode = mode # combination of 'q', 'k', 'v'. e.g. 'qk'
+        if 'q' in mode:
+            self.k_embedding = nn.Embedding(2 * e_length - 1, d_qkv)
+        if 'k' in mode:
+            self.q_embedding = nn.Embedding(2 * e_length - 1, d_qkv)
+        if 'v' in mode:
+            self.v_embedding = nn.Embedding(2 * e_length - 1, d_qkv)
 
         # We provide these model parameters to give an example of a weight
         # initialization approach that we know works well for our tasks. Feel free
@@ -57,16 +67,41 @@ class MultiHeadAttention(nn.Module):
         q = torch.einsum('blm,nmh->bnlh', [x, self.w_q]) # (batch size, n_head, length, d_qkv)
         k = torch.einsum('blm,nmh->bnlh', [x, self.w_k]) # (batch size, n_head, length, d_qkv)
         v = torch.einsum('blm,nmh->bnlh', [x, self.w_v]) # (batch size, n_head, length, d_qkv)
-        scores = torch.matmul(q, k.transpose(-2, -1)) / math.sqrt(self.d_qkv) # (batch size, n_head, length, length)
+
+        length = x.shape[1]
+        position_ids_l = torch.arange(length, dtype=torch.long, device=x.device).view(-1, 1)
+        position_ids_r = torch.arange(length, dtype=torch.long, device=x.device).view(1, -1)
+        distance = position_ids_l - position_ids_r
+        distance[distance >= self.e_length] = self.e_length - 1
+        distance[distance <= -self.e_length] = 1 - self.e_length
+
+        scores = torch.matmul(q, k.transpose(-2, -1))
+        
+        if 'q' in self.mode:
+            k_embed = self.k_embedding(distance + self.e_length - 1) # i, j, d_qkv
+            scores_k = torch.einsum("bnjd,ijd->bnij", [k, k_embed])
+            scores = scores + scores_k
+        if 'k' in self.mode:
+            q_embed = self.q_embedding(distance + self.e_length - 1)
+            scores_q = torch.einsum("bnid,ijd->bnij", [q, q_embed])
+            scores = scores + scores_q
+
+        scores = scores / math.sqrt(self.d_qkv) # (batch size, n_head, length, length)
         if mask is not None:
             scores = scores.masked_fill((mask == 0).unsqueeze(-2).unsqueeze(1), -1e9)
         p_attn = F.softmax(scores, dim = -1)
 
         if DRAW: self.p_attn = p_attn
-
+        
         p_attn = self.dropout_s(p_attn)
         
         x = torch.matmul(p_attn, v) # (batch size, n_head, length, d_qkv)
+
+        if 'v' in self.mode:
+            v_embed = self.v_embedding(distance + self.e_length - 1)
+            v_x = torch.einsum('bnij,ijd->bnid', [p_attn, v_embed])
+            x = x + v_x
+
         x = torch.matmul(x, self.w_o) # (batch size, n_head, length, d_model)
         return self.dropout_o(x.sum(dim = 1)) # (batch size, length, d_model)
 
@@ -76,6 +111,8 @@ class MultiHeadAttention(nn.Module):
             "n_head": self.n_head,
             "d_qkv": self.d_qkv,
             "dropout": self.dropout,
+            "e_length": self.e_length,
+            "mode": self.mode
         }
         return model_hps
     
@@ -107,9 +144,9 @@ class PositionwiseFeedForward(nn.Module):
 class EncoderLayer(nn.Module):
     "Encoder is made up of self-attn and feed forward (defined below)"
     def __init__(self, d_model=256, d_ff=1024, n_head=4, d_qkv=32,
-                dropout=0.1):
+                dropout=0.1, e_length=5, mode='k'):
         super(EncoderLayer, self).__init__()
-        self.self_attn = MultiHeadAttention(d_model, n_head, d_qkv, dropout)
+        self.self_attn = MultiHeadAttention(d_model, n_head, d_qkv, dropout, e_length, mode)
         self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
         self.layer_norm = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(2)])
         self.d_model = d_model
@@ -159,9 +196,9 @@ class COSPositionalEncoding(nn.Module):
                          requires_grad=False)
         return self.dropout(x)
 
-class TransformerEncoder(nn.Module):
+class RelativeTransformerEncoder(nn.Module):
     def __init__(self, d_model=256, d_ff=1024, n_layers=4, n_head=4, d_qkv=32,
-                dropout=0.1, pos_embed='none'):
+                dropout=0.1, pos_embed='none', e_length=5, mode='k'):
         super().__init__()
         # Implementation tip: if you are storing nn.Module objects in a list, use
         # nn.ModuleList. If you use assignment statements of the form
@@ -177,6 +214,8 @@ class TransformerEncoder(nn.Module):
         self.d_qkv = d_qkv
         self.dropout = dropout
         self.pos_embed = pos_embed
+        self.e_length = e_length
+        self.mode = mode
 
         if pos_embed == 'none':
             self.add_timing = lambda x: x
@@ -185,7 +224,7 @@ class TransformerEncoder(nn.Module):
         elif pos_embed == 'cos':
             self.add_timing = COSPositionalEncoding(d_model=d_model, max_len=512)
 
-        self.sublayers = nn.ModuleList([EncoderLayer(d_model, d_ff, n_head, d_qkv, dropout) for _ in range(n_layers)])
+        self.sublayers = nn.ModuleList([EncoderLayer(d_model, d_ff, n_head, d_qkv, dropout, e_length, mode) for _ in range(n_layers)])
 
     def forward(self, x, mask):
         """Runs the Transformer encoder.
@@ -228,64 +267,8 @@ class TransformerEncoder(nn.Module):
             "d_qkv": self.d_qkv,
             "dropout": self.dropout,
             "pos_embed": self.pos_embed,
-        }
-        return model_hps
-
-    def extra_repr(self) -> str:
-        return ", ".join(["{}={}".format(k,v) for k,v in self._get_hyperparams().items()])
-
-class MultiHeadEncoder(nn.Module):
-    def __init__(self, d_model=256, n_head=4, d_qkv=32, dropout=0.1, pos_embed='none'):
-        super().__init__()
-        # Implementation tip: if you are storing nn.Module objects in a list, use
-        # nn.ModuleList. If you use assignment statements of the form
-        # `self.sublayers = [x, y, z]` with a plain python list instead of a
-        # ModuleList, you might find that none of the sub-layer parameters are
-        # trained.
-
-        """YOUR CODE HERE"""
-        self.d_model = d_model
-        self.n_head = n_head
-        self.d_qkv = d_qkv
-        self.dropout = dropout
-        self.pos_embed = pos_embed
-
-        if pos_embed == 'none':
-            self.add_timing = lambda x: x
-        elif pos_embed == 'add':
-            self.add_timing = AddPositionalEncoding(d_model=d_model)
-        elif pos_embed == 'cos':
-            self.add_timing = COSPositionalEncoding(d_model=d_model, max_len=512)
-
-        self.sublayer = MultiHeadAttention(d_model, n_head, d_qkv, dropout)
-
-    def forward(self, x, mask):
-        """Runs the Transformer encoder.
-
-        Args:
-        x: the input to the Transformer, a tensor of shape
-            [batch size, length, d_model]
-        mask: a mask for disallowing attention to padding tokens. You will need to
-                construct the mask yourself further on in this notebook. You may
-                implement masking in any way; there is no requirement that you use
-                a particular form for the mask object.
-        Returns:
-        A single tensor containing the output from the Transformer
-            [batch size, length, d_model]
-        """
-
-        """YOUR CODE HERE"""
-        x = self.add_timing(x)
-        x = self.sublayer(x, mask)
-        return x
-
-    def _get_hyperparams(self):
-        model_hps = {
-            "d_model": self.d_model,
-            "n_head": self.n_head,
-            "d_qkv": self.d_qkv,
-            "dropout": self.dropout,
-            "pos_embed": self.pos_embed,
+            "e_length": self.e_length,
+            "mode": self.mode
         }
         return model_hps
 
