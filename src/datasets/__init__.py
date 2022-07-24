@@ -4,3 +4,5 @@ from .treebanks import BLLIPCorpus
 from .sequence_labeling import AUTO_CONLL_03
 
 from .text import StandardPTBCorpus, BLLIPTextCorpus, UDGNBLLIPTextCorpus
+
+from .toy import ToyCorpus
