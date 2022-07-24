@@ -55,8 +55,6 @@ tag_type = config["Corpus"].pop("tag_type")
 # 2. get the corpus
 corpus_name, corpus_config = list(config["Corpus"].items())[0]
 corpus: Corpus = utils.getattrs([datasets, flair.datasets], corpus_name)(**corpus_config)
-if "CorpusDownSample" in config:
-    corpus = corpus.downsample(**config["CorpusDownSample"])
 log.info(corpus)
 
 
@@ -90,6 +88,10 @@ tagger = modelClass(
     **config["SequenceTagger"]
 )
 
+# Late downsample to use the same vocabulary
+if "CorpusDownSample" in config:
+    corpus = corpus.downsample(**config["CorpusDownSample"])
+    log.info(corpus)
 
 # 6. initialize trainer
 trainer_name = config["Trainer"].pop("trainer", "CustomModelTrainer")

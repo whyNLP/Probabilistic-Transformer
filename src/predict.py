@@ -43,4 +43,7 @@ tagger = modelClass.load(base_path / "best-model.pt")
 sentence = Sentence(["no", "it", "was", "n't", "black", "monday"])
 tagger.predict(sentence)
 
+# Uncomment if you need label
+# tagger.predict(sentence, obtain_labels=True, all_tag_prob=True)
+
 print(sentence)
