@@ -5,15 +5,18 @@ import torch.nn.functional as F
 import opt_einsum as oe
 import math
 
+from .transformer import AddPositionalEncoding, COSPositionalEncoding
+
 import os
 DEBUG=os.environ.get('DEBUG')
 DRAW=os.environ.get('DRAW')
 
 if DRAW: from .recorder import HeadRecorder
 
-class GlobalHeadProbEncoder(nn.Module):
+class AbsGlobalHeadProbEncoder(nn.Module):
     """
     Head Probabilistic Transformer encoder with global nodes.
+    Using absolute positional embedding.
     """
     def __init__(self, 
             d_model: int = 32, 
@@ -27,7 +30,7 @@ class GlobalHeadProbEncoder(nn.Module):
             regularize_H: float = 1,
             regularize_Z: float = 1,
             norm: str = 'softmax', 
-            dists: str = "",
+            pos_embed: str = "add",
             async_update: bool = True,
             output_prob: bool = False,
             use_td: str = 'no',
@@ -52,14 +55,7 @@ class GlobalHeadProbEncoder(nn.Module):
                 'Regularized Frank-Wolfe for Dense CRFs: GeneralizingMean Field and 
                 Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
         :param norm: normalization method. Options: ['softmax', 'relu'], Default: 'softmax'.
-        :param dists: distance pattern. Each distance group will use different factors. 
-                      Dists should be groups of numbers seperated by ','. Each number represents
-                      a seperate point. Empty means all tenery factors share the same parameters.
-                      Note that the minimum seperate point you input should be 2. Default: "".
-                      E.g. "" -> [1, +oo)
-                           "3" -> [1, 2), [3, +oo)
-                           "2, 4" -> [1, 2), [2, 4), [4, +oo)
-                                i.e. {1}, {2, 3}, [4, +oo)
+        :param pos_embed: positional embedding. Options: ['none', 'add', 'cos'], Default: 'add'.
         :param async_update: update the q values asyncronously (Y first, then Z). Default: True.
         :param output_prob: If true, output a normalized probabilistic distribution. Otherwise
                             output unnormalized scores.
@@ -95,8 +91,7 @@ class GlobalHeadProbEncoder(nn.Module):
         self.regularize_H = regularize_H
         self.regularize_Z = regularize_Z
         self.norm = norm
-        self.dists = dists
-        self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
+        self.pos_embed = pos_embed
         self.async_update = async_update
         self.output_prob = output_prob
         self.use_td = use_td.replace(' ', '')
@@ -105,7 +100,15 @@ class GlobalHeadProbEncoder(nn.Module):
         self.use_td_global = use_td_global.replace(' ', '')
         self.mode = mode
 
-        assert not self._dists or all([n>1 for n in self._dists]), "The minimum seperate point should be 2. See docs about distance."
+        if pos_embed == 'none':
+            self.add_timing = lambda x: x
+        elif pos_embed == 'add':
+            self.add_timing = AddPositionalEncoding(d_model=d_model)
+        elif pos_embed == 'cos':
+            self.add_timing = COSPositionalEncoding(d_model=d_model, max_len=512)
+        else:
+            raise ValueError(f"pos_embed should be one of 'none', 'add', 'cos', but find {pos_embed}")
+
         assert self.mode in ('all-attn', 'attn-split', 'single-channel') or self.mode.endswith('-channel'), f"Unexpected mode: {self.mode}"
 
         if self.norm == 'softmax':
@@ -117,20 +120,20 @@ class GlobalHeadProbEncoder(nn.Module):
 
         if self.use_td.startswith('uv:'):
             rank = int(self.use_td.split(':')[-1])
-            self.U = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank, self.n_head))
-            self.V = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank, self.n_head))
+            self.U = nn.Parameter(torch.Tensor(self.d_model, rank, self.n_head))
+            self.V = nn.Parameter(torch.Tensor(self.d_model, rank, self.n_head))
             nn.init.normal_(self.U, std = 1/math.sqrt(rank))
             nn.init.normal_(self.V, std = 1/math.sqrt(rank))
         elif self.use_td.startswith('uvw:'):
             rank = int(self.use_td.split(':')[-1])
-            self.U = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank))
-            self.V = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank))
-            self.W = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.n_head, rank))
+            self.U = nn.Parameter(torch.Tensor(self.d_model, rank))
+            self.V = nn.Parameter(torch.Tensor(self.d_model, rank))
+            self.W = nn.Parameter(torch.Tensor(self.n_head, rank))
             nn.init.normal_(self.U, std = 1/math.sqrt(rank))
             nn.init.normal_(self.V, std = 1/math.sqrt(rank))
             nn.init.normal_(self.W, std = 1/math.sqrt(rank))
         else:
-            self.ternary = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, self.d_model, self.n_head))
+            self.ternary = nn.Parameter(torch.Tensor(self.d_model, self.d_model, self.n_head))
             nn.init.normal_(self.ternary)
 
         global_heads = 1 if self.mode == 'single-channel' else self.n_head
@@ -156,19 +159,6 @@ class GlobalHeadProbEncoder(nn.Module):
         self.dropout_h = nn.Dropout(p = dropout)
         self.dropout_z = nn.Dropout(p = dropout)
 
-        ## Build dist mask in advance. This may accelerate the forward process.
-        ## Pre-defined max length. If exceeded, calculate during the forward process.
-        self.max_len = 150
-        distmask = torch.ones(len(self._dists)+1, self.max_len, self.max_len, dtype=torch.float).triu(1)
-        if len(self._dists) > 0: # At least two dist blocks
-            distmask[0] = distmask[0].tril(self._dists[0]-1)
-            for i in range(1, len(self._dists)):
-                ni_1, ni = self._dists[i-1], self._dists[i]
-                distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
-            distmask[-1] = distmask[-1].triu(self._dists[-1])
-        distmask = torch.cat((distmask, distmask.transpose(-2, -1)), dim=0)
-        self.distmask = distmask
-
     def forward(self, x, mask):
         batch_size, max_len, _ = x.shape
 
@@ -179,26 +169,16 @@ class GlobalHeadProbEncoder(nn.Module):
         mask2d = ~mask2d.view(batch_size, 1, max_len, max_len).repeat_interleave(self.n_head,1)
         mask2d = torch.cat((mask2d, torch.zeros(batch_size, self.n_head, max_len, self.n_global).to(x.device, dtype=mask2d.dtype)), dim=-1)
 
-        if self.max_len < max_len:
-            distmask = torch.ones(len(self._dists)+1, max_len, max_len, dtype=torch.float).triu(1).to(x.device)
-            if len(self._dists) > 0: # At least two dist blocks
-                distmask[0] = distmask[0].tril(self._dists[0]-1)
-                for i in range(1, len(self._dists)):
-                    ni_1, ni = self._dists[i-1], self._dists[i]
-                    distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
-                distmask[-1] = distmask[-1].triu(self._dists[-1])
-            distmask = torch.cat((distmask, distmask.transpose(-2, -1)), dim=0)
-        else:
-            distmask = self.distmask[:, :max_len, :max_len].to(x.device)
+        x = self.add_timing(x)
 
         ## Unary score
         unary = x # (batch_size, max_len, d_model)
 
         ## Recover ternary score
         if self.use_td.startswith('uv:'):
-            ternary = oe.contract('kadc,kbdc->kabc', *[self.U, self.V], backend='torch')
+            ternary = oe.contract('adc,bdc->abc', *[self.U, self.V], backend='torch')
         elif self.use_td.startswith('uvw:'):
-            ternary = oe.contract('kad,kbd,kcd->kabc', *[self.U, self.V, self.W], backend='torch')
+            ternary = oe.contract('ad,bd,cd->abc', *[self.U, self.V, self.W], backend='torch')
         else:
             ternary = self.ternary
 
@@ -277,7 +257,7 @@ class GlobalHeadProbEncoder(nn.Module):
                 q_z = q_z*(~mask1d) 
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F1 = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, ternary, distmask], backend='torch')
+                second_order_message_F1 = oe.contract('zia,zjb,abc->zcij',*[q_z, q_z, ternary], backend='torch')
                 second_order_message_F2 = oe.contract('zia,jac->zcij',*[q_z, global_], backend='torch')
                 second_order_message_F = torch.cat((second_order_message_F1, second_order_message_F2), dim=-1)
                 
@@ -297,9 +277,9 @@ class GlobalHeadProbEncoder(nn.Module):
                 cache_norm_qh = q_h.clone()
                 
                 # Calculate 2nd message for different dists
-                second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h[...,:max_len], ternary, distmask], backend='torch')
+                second_order_message_G = oe.contract('zjb,zcij,abc->zia', *[q_z, q_h[...,:max_len], ternary], backend='torch')
                 if not self.block_msg:
-                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h[...,:max_len], ternary, distmask], backend='torch')
+                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,bac->zia', *[q_z, q_h[...,:max_len], ternary], backend='torch')
                 second_order_message_G = second_order_message_G + oe.contract('zcij,jac->zia', *[q_h[...,max_len:], global_], backend='torch')
                 
                 # Update
@@ -396,9 +376,9 @@ class GlobalHeadProbEncoder(nn.Module):
     def getTernaryNorm(self, p):
         ## Recover ternary score
         if self.use_td.startswith('uv:'):
-            ternary = oe.contract('kadc,kbdc->kabc', *[self.U, self.V], backend='torch')
+            ternary = oe.contract('adc,bdc->abc', *[self.U, self.V], backend='torch')
         elif self.use_td.startswith('uvw:'):
-            ternary = oe.contract('kad,kbd,kcd->kabc', *[self.U, self.V, self.W], backend='torch')
+            ternary = oe.contract('ad,bd,cd->abc', *[self.U, self.V, self.W], backend='torch')
         else:
             ternary = self.ternary
         
@@ -428,7 +408,7 @@ class GlobalHeadProbEncoder(nn.Module):
             "regularize_H": self.regularize_H,
             "regularize_Z": self.regularize_Z,
             "norm": self.norm,
-            "dists": self.dists,
+            "pos_embed": self.pos_embed,
             "async_update": self.async_update,
             "output_prob": self.output_prob,
             'use_td': self.use_td,
@@ -444,9 +424,10 @@ class GlobalHeadProbEncoder(nn.Module):
 
 
 
-class SingleGlobalHeadProbEncoder(nn.Module):
+class AbsSingleGlobalHeadProbEncoder(nn.Module):
     """
     Head Probabilistic Transformer encoder with global nodes.
+    Using absolute positional embedding.
     Optimized for single channel mode.
     """
     def __init__(self, 
@@ -461,7 +442,7 @@ class SingleGlobalHeadProbEncoder(nn.Module):
             regularize_H: float = 1,
             regularize_Z: float = 1,
             norm: str = 'softmax', 
-            dists: str = "",
+            pos_embed: str = "add",
             async_update: bool = True,
             output_prob: bool = False,
             use_td: str = 'no',
@@ -486,14 +467,7 @@ class SingleGlobalHeadProbEncoder(nn.Module):
                 'Regularized Frank-Wolfe for Dense CRFs: GeneralizingMean Field and 
                 Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
         :param norm: normalization method. Options: ['softmax', 'relu'], Default: 'softmax'.
-        :param dists: distance pattern. Each distance group will use different factors. 
-                      Dists should be groups of numbers seperated by ','. Each number represents
-                      a seperate point. Empty means all tenery factors share the same parameters.
-                      Note that the minimum seperate point you input should be 2. Default: "".
-                      E.g. "" -> [1, +oo)
-                           "3" -> [1, 2), [3, +oo)
-                           "2, 4" -> [1, 2), [2, 4), [4, +oo)
-                                i.e. {1}, {2, 3}, [4, +oo)
+        :param pos_embed: positional embedding. Options: ['none', 'add', 'cos'], Default: 'add'.
         :param async_update: update the q values asyncronously (Y first, then Z). Default: True.
         :param output_prob: If true, output a normalized probabilistic distribution. Otherwise
                             output unnormalized scores.
@@ -529,8 +503,7 @@ class SingleGlobalHeadProbEncoder(nn.Module):
         self.regularize_H = regularize_H
         self.regularize_Z = regularize_Z
         self.norm = norm
-        self.dists = dists
-        self._dists = sorted([int(n) for n in dists.replace(' ', '').split(',') if n])
+        self.pos_embed = pos_embed
         self.async_update = async_update
         self.output_prob = output_prob
         self.use_td = use_td.replace(' ', '')
@@ -539,7 +512,15 @@ class SingleGlobalHeadProbEncoder(nn.Module):
         self.use_td_global = use_td_global.replace(' ', '')
         self.mode = mode
 
-        assert not self._dists or all([n>1 for n in self._dists]), "The minimum seperate point should be 2. See docs about distance."
+        if pos_embed == 'none':
+            self.add_timing = lambda x: x
+        elif pos_embed == 'add':
+            self.add_timing = AddPositionalEncoding(d_model=d_model)
+        elif pos_embed == 'cos':
+            self.add_timing = COSPositionalEncoding(d_model=d_model, max_len=512)
+        else:
+            raise ValueError(f"pos_embed should be one of 'none', 'add', 'cos', but find {pos_embed}")
+
         assert self.mode in ('attn-split', 'single-channel') or self.mode.endswith('-channel'), f"Unexpected mode: {self.mode}"
 
         if self.norm == 'softmax':
@@ -551,20 +532,22 @@ class SingleGlobalHeadProbEncoder(nn.Module):
 
         if self.use_td.startswith('uv:'):
             rank = int(self.use_td.split(':')[-1])
-            self.U = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank, self.n_head))
-            self.V = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank, self.n_head))
+            self.U = nn.Parameter(torch.Tensor(self.d_model, rank, self.n_head))
+            self.V = nn.Parameter(torch.Tensor(self.d_model, rank, self.n_head))
             nn.init.normal_(self.U, std = 1/math.sqrt(rank))
             nn.init.normal_(self.V, std = 1/math.sqrt(rank))
+            # nn.init.uniform_(self.U, a = -1/math.sqrt(self.d_model), b = 1/math.sqrt(self.d_model))
+            # nn.init.uniform_(self.V, a = -1/math.sqrt(self.d_model), b = 1/math.sqrt(self.d_model))
         elif self.use_td.startswith('uvw:'):
             rank = int(self.use_td.split(':')[-1])
-            self.U = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank))
-            self.V = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, rank))
-            self.W = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.n_head, rank))
+            self.U = nn.Parameter(torch.Tensor(self.d_model, rank))
+            self.V = nn.Parameter(torch.Tensor(self.d_model, rank))
+            self.W = nn.Parameter(torch.Tensor(self.n_head, rank))
             nn.init.normal_(self.U, std = 1/math.sqrt(rank))
             nn.init.normal_(self.V, std = 1/math.sqrt(rank))
             nn.init.normal_(self.W, std = 1/math.sqrt(rank))
         else:
-            self.ternary = nn.Parameter(torch.Tensor(2*(len(self._dists)+1), self.d_model, self.d_model, self.n_head))
+            self.ternary = nn.Parameter(torch.Tensor(self.d_model, self.d_model, self.n_head))
             nn.init.normal_(self.ternary)
 
         global_heads = 1 if self.mode == 'single-channel' else self.n_head
@@ -590,19 +573,6 @@ class SingleGlobalHeadProbEncoder(nn.Module):
         self.dropout_h = nn.Dropout(p = dropout)
         self.dropout_z = nn.Dropout(p = dropout)
 
-        ## Build dist mask in advance. This may accelerate the forward process.
-        ## Pre-defined max length. If exceeded, calculate during the forward process.
-        self.max_len = 150
-        distmask = torch.ones(len(self._dists)+1, self.max_len, self.max_len, dtype=torch.float).triu(1)
-        if len(self._dists) > 0: # At least two dist blocks
-            distmask[0] = distmask[0].tril(self._dists[0]-1)
-            for i in range(1, len(self._dists)):
-                ni_1, ni = self._dists[i-1], self._dists[i]
-                distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
-            distmask[-1] = distmask[-1].triu(self._dists[-1])
-        distmask = torch.cat((distmask, distmask.transpose(-2, -1)), dim=0)
-        self.distmask = distmask
-
     def forward(self, x, mask):
         batch_size, max_len, _ = x.shape
 
@@ -613,26 +583,16 @@ class SingleGlobalHeadProbEncoder(nn.Module):
         mask2d = ~mask2d.view(batch_size, 1, max_len, max_len).repeat_interleave(self.n_head,1)
         # mask2d = torch.cat((mask2d, torch.zeros(batch_size, self.n_head, max_len, self.n_global).to(x.device, dtype=mask2d.dtype)), dim=-1)
 
-        if self.max_len < max_len:
-            distmask = torch.ones(len(self._dists)+1, max_len, max_len, dtype=torch.float).triu(1).to(x.device)
-            if len(self._dists) > 0: # At least two dist blocks
-                distmask[0] = distmask[0].tril(self._dists[0]-1)
-                for i in range(1, len(self._dists)):
-                    ni_1, ni = self._dists[i-1], self._dists[i]
-                    distmask[i] = distmask[i].triu(ni_1) - distmask[i].triu(ni)
-                distmask[-1] = distmask[-1].triu(self._dists[-1])
-            distmask = torch.cat((distmask, distmask.transpose(-2, -1)), dim=0)
-        else:
-            distmask = self.distmask[:, :max_len, :max_len].to(x.device)
+        x = self.add_timing(x)
 
         ## Unary score
         unary = x # (batch_size, max_len, d_model)
 
         ## Recover ternary score
         if self.use_td.startswith('uv:'):
-            ternary = oe.contract('kadc,kbdc->kabc', *[self.U, self.V], backend='torch')
+            ternary = oe.contract('adc,bdc->abc', *[self.U, self.V], backend='torch')
         elif self.use_td.startswith('uvw:'):
-            ternary = oe.contract('kad,kbd,kcd->kabc', *[self.U, self.V, self.W], backend='torch')
+            ternary = oe.contract('ad,bd,cd->abc', *[self.U, self.V, self.W], backend='torch')
         else:
             ternary = self.ternary
 
@@ -712,7 +672,7 @@ class SingleGlobalHeadProbEncoder(nn.Module):
                 q_z = q_z*(~mask1d) 
                 
                 # Calculate 2nd message for different dists
-                second_order_message_F1 = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, ternary, distmask], backend='torch')
+                second_order_message_F1 = oe.contract('zia,zjb,abc->zcij',*[q_z, q_z, ternary], backend='torch')
                 second_order_message_F2 = oe.contract('zia,jac->zcij',*[q_z, global_], backend='torch')
                 # second_order_message_F = torch.cat((second_order_message_F1, second_order_message_F2), dim=-1)
                 
@@ -737,9 +697,9 @@ class SingleGlobalHeadProbEncoder(nn.Module):
                 cache_norm_qh2 = q_h2.clone()
                 
                 # Calculate 2nd message for different dists
-                second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h1, ternary, distmask], backend='torch')
+                second_order_message_G = oe.contract('zjb,zcij,abc->zia', *[q_z, q_h1, ternary], backend='torch')
                 if not self.block_msg:
-                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbac,kji->zia', *[q_z, q_h1, ternary, distmask], backend='torch')
+                    second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,bac->zia', *[q_z, q_h1, ternary], backend='torch')
                 second_order_message_G = second_order_message_G + oe.contract('zcij,jac->zia', *[q_h2, global_], backend='torch')
                 
                 # Update
@@ -840,9 +800,9 @@ class SingleGlobalHeadProbEncoder(nn.Module):
     def getTernaryNorm(self, p):
         ## Recover ternary score
         if self.use_td.startswith('uv:'):
-            ternary = oe.contract('kadc,kbdc->kabc', *[self.U, self.V], backend='torch')
+            ternary = oe.contract('adc,bdc->abc', *[self.U, self.V], backend='torch')
         elif self.use_td.startswith('uvw:'):
-            ternary = oe.contract('kad,kbd,kcd->kabc', *[self.U, self.V, self.W], backend='torch')
+            ternary = oe.contract('ad,bd,cd->abc', *[self.U, self.V, self.W], backend='torch')
         else:
             ternary = self.ternary
         
@@ -872,7 +832,7 @@ class SingleGlobalHeadProbEncoder(nn.Module):
             "regularize_H": self.regularize_H,
             "regularize_Z": self.regularize_Z,
             "norm": self.norm,
-            "dists": self.dists,
+            "pos_embed": self.pos_embed,
             "async_update": self.async_update,
             "output_prob": self.output_prob,
             'use_td': self.use_td,
