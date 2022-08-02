@@ -7,7 +7,7 @@ from .identity import Identity
 from .rootedHeadCRFEncoder import SharedRootedHeadProbEncoder, RootedHeadProbEncoder
 from .multiZheadCRFEncoder import MultiZHeadProbEncoder
 from .headWordCRFEncoder import HeadWordProbEncoder, PseudoHeadWordProbEncoder
-from .globalHeadCRFEncoder import GlobalHeadProbEncoder
+from .globalHeadCRFEncoder import GlobalHeadProbEncoder, SingleGlobalHeadProbEncoder
 from .transformer import MultiHeadEncoder
 from .wordCRFEncoder import WordProbEncoder
 from .xformer import EmbedResidualTransformerEncoder
@@ -17,3 +17,4 @@ from .relativeTransformer import RelativeTransformerEncoder
 from .relativeHeadCRFEncoder import AddHeadProbEncoder, GaussianHeadProbEncoder, BernsteinHeadProbEncoder, GaussianLayerHeadProbEncoder, LogGaussianHeadProbEncoder, DecomposedHeadProbEncoder
 from .absoluteHeadCRFEncoder import AbsoluteHeadProbEncoder
 from .lazyHeadCRFEncoder import LazyHeadProbEncoder, HalfLazyHeadProbEncoder
+from .absGlobalHeadCRFEncoder import AbsGlobalHeadProbEncoder, AbsSingleGlobalHeadProbEncoder
