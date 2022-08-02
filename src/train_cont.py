@@ -90,7 +90,7 @@ tagger = modelClass(
 # 6. initialize trainer
 trainer_name = config["Trainer"].pop("trainer", "CustomModelTrainer")
 trainerClass = utils.getattrs([trainers], trainer_name)
-trainer = trainerClass(tagger, corpus, optimizer=torch.optim.Adam, **(config["Trainer"].pop("init") if "init" in config["Trainer"] else {}) )
+trainer = trainerClass(tagger, corpus, optimizer=eval(config["Trainer"].pop("optimizer", "torch.optim.Adam")), **(config["Trainer"].pop("init") if "init" in config["Trainer"] else {}) )
 
 if "scheduler" in config["Trainer"]:
     config["Trainer"]["scheduler"] = eval(config["Trainer"]["scheduler"])
