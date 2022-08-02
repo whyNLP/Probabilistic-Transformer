@@ -36,6 +36,7 @@ class SharedRootedHeadProbEncoder(nn.Module):
             block_msg: bool = False,
             embed_root: bool = False,
             head_root: bool = False,
+            output_root: bool = False
         ):
         """
         Initialize a basic Probabilistic Transformer encoder.
@@ -95,6 +96,7 @@ class SharedRootedHeadProbEncoder(nn.Module):
         self.block_msg = block_msg
         self.embed_root = embed_root
         self.head_root = head_root
+        self.output_root = output_root
 
         assert not self._dists or all([n>1 for n in self._dists]), "The minimum seperate point should be 2. See docs about distance."
 
@@ -333,7 +335,9 @@ class SharedRootedHeadProbEncoder(nn.Module):
             q_z = q_z*(~mask1d)
         
         # Twist for ROOT
-        q_z = q_z[:,1:,:]
+        if not self.output_root:
+            q_z = q_z[:,1:,:]
+        
         return q_z
     
     def getTernaryNorm(self, p):
@@ -366,7 +370,8 @@ class SharedRootedHeadProbEncoder(nn.Module):
             "dropout": self.dropout,
             "block_msg": self.block_msg,
             "embed_root": self.embed_root,
-            "head_root": self.head_root
+            "head_root": self.head_root,
+            "output_root": self.output_root
         }
         return model_hps
     
@@ -396,7 +401,8 @@ class RootedHeadProbEncoder(nn.Module):
             use_td: str = 'no',
             use_root_td: str = 'no',
             dropout: float = 0,
-            block_msg: bool = False
+            block_msg: bool = False,
+            output_root: bool = False
         ):
         """
         Initialize a basic Probabilistic Transformer encoder.
@@ -457,6 +463,7 @@ class RootedHeadProbEncoder(nn.Module):
         self.use_root_td = use_root_td.replace(' ', '')
         self.dropout = dropout
         self.block_msg = block_msg
+        self.output_root = output_root
 
         assert not self._dists or all([n>1 for n in self._dists]), "The minimum seperate point should be 2. See docs about distance."
 
@@ -710,6 +717,10 @@ class RootedHeadProbEncoder(nn.Module):
         if self.output_prob:
             q_z = (1-self.stepsize_Z) * cache_norm_qz + self.stepsize_Z * self.norm_func(q_z)
             q_z = q_z*(~mask1d)
+
+        if self.output_root:
+            return q_root.unsqueeze(1)
+
         return q_z
     
     def getTernaryNorm(self, p):
@@ -752,7 +763,8 @@ class RootedHeadProbEncoder(nn.Module):
             'use_td': self.use_td,
             "use_root_td": self.use_root_td,
             "dropout": self.dropout,
-            "block_msg": self.block_msg
+            "block_msg": self.block_msg,
+            "output_root": self.output_root
         }
         return model_hps
     
