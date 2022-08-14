@@ -195,9 +195,9 @@ class LazyHeadProbEncoder(nn.Module):
                 
                 # Calculate 2nd message for different dists
                 if self.use_td.startswith('uv:'):
-                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, self.ternary, distmask], backend='torch')
                 
@@ -218,13 +218,13 @@ class LazyHeadProbEncoder(nn.Module):
                 
                 # Calculate 2nd message for different dists
                 if self.use_td.startswith('uv:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, self.ternary, distmask], backend='torch')
                     if not self.block_msg:
@@ -253,20 +253,20 @@ class LazyHeadProbEncoder(nn.Module):
                 
                 # Calculate 2nd message for different dists
                 if self.use_td.startswith('uv:'):
-                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, self.ternary, distmask], backend='torch')
                 
                 if self.use_td.startswith('uv:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, self.ternary, distmask], backend='torch')
                     if not self.block_msg:
@@ -370,7 +370,7 @@ class LazyHeadProbEncoder(nn.Module):
 class HalfLazyHeadProbEncoder(nn.Module):
     """
     Head Probabilistic Transformer encoder.
-    Do not recover ternary score.
+    Recover ternary score only when calculating ternary norm.
     """
     def __init__(self, 
             d_model: int = 32, 
@@ -562,9 +562,9 @@ class HalfLazyHeadProbEncoder(nn.Module):
                 
                 # Calculate 2nd message for different dists
                 if self.use_td.startswith('uv:'):
-                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, self.ternary, distmask], backend='torch')
                 
@@ -585,13 +585,13 @@ class HalfLazyHeadProbEncoder(nn.Module):
                 
                 # Calculate 2nd message for different dists
                 if self.use_td.startswith('uv:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, self.ternary, distmask], backend='torch')
                     if not self.block_msg:
@@ -620,20 +620,20 @@ class HalfLazyHeadProbEncoder(nn.Module):
                 
                 # Calculate 2nd message for different dists
                 if self.use_td.startswith('uv:'):
-                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kadc,kbdc,kij->zcij',*[q_z, q_z, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_F = oe.contract('zia,zjb,kad,kbd,kcd,kij->zcij',*[q_z, q_z, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_F = oe.contract('zia,zjb,kabc,kij->zcij',*[q_z, q_z, self.ternary, distmask], backend='torch')
                 
                 if self.use_td.startswith('uv:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kadc,kbdc,kij->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbdc,kadc,kji->zia', *[q_z, q_h, self.U, self.V, distmask], backend='torch', optimize='optimal')
                 elif self.use_td.startswith('uvw:'):
-                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                    second_order_message_G = oe.contract('zjb,zcij,kad,kbd,kcd,kij->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                     if not self.block_msg:
-                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch')
+                        second_order_message_G = second_order_message_G + oe.contract('zjb,zcji,kbd,kad,kcd,kji->zia', *[q_z, q_h, self.U, self.V, self.W, distmask], backend='torch', optimize='optimal')
                 else:
                     second_order_message_G = oe.contract('zjb,zcij,kabc,kij->zia', *[q_z, q_h, self.ternary, distmask], backend='torch')
                     if not self.block_msg:

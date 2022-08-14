@@ -114,10 +114,6 @@ class PennTreebankCorpus(Corpus):
                 tag_dictionary.add_item(token)
             return tag_dictionary
         
-        elif tag_type == 'pos':
-
-            return super().make_label_dictionary(tag_type)
-        
         else:
 
             return super().make_tag_dictionary(tag_type)
