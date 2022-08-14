@@ -12,7 +12,7 @@ MODE:
 ## ================= MODIFY THE SETTING HERE =================
 MODE = 'average' # Options: 'average', 'hit', 'best', 'left', 'right', 'random'
 ITERATION = -1 # Options: 1, 2, ...; -1 is the last iteration.
-ALGORITHM = 'argmax' # 'argmax', 'nonprojective'
+ALGORITHM = 'argmax' # 'argmax', 'nonprojective', 'projective'
 ## ===========================================================
 
 from pathlib import Path

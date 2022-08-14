@@ -1,5 +1,6 @@
 import torch
 from supar.structs.fn import chuliu_edmonds
+from supar import DependencyCRF
 
 def nonprojective_parse(heads: torch.Tensor):
     """
@@ -19,6 +20,18 @@ def nonprojective_parse(heads: torch.Tensor):
     parse = chuliu_edmonds(scores)
 
     return parse[1:].numpy().tolist()
+
+def projective_parse(heads: torch.Tensor):
+    """
+    Parse with Eisner algorithm.
+    TODO: check the correctness of this module.
+
+    :param heads: Tensor with shape [length, 1 + length].
+    """
+    length, _ = heads.shape
+    scores = torch.cat((torch.zeros(1, 1 + length), heads), dim=0)
+    crf = DependencyCRF(scores.unsqueeze(0), multiroot=False)
+    return crf.argmax[0,1:].numpy().tolist()
 
 class HeadRecorder:
     def __init__(self, use_root = True):
@@ -117,7 +130,7 @@ class HeadRecorder:
         :return: confidence: List of confidence of each word's head.
         :return: indices: List of index of each word's head. If use root, the index of root is 0.
         """
-        heads = heads.detach().cpu()
+        heads: torch.Tensor = heads.detach().cpu()
 
         if algorithm == 'argmax':
             confidence, indices = heads.max(dim = 1)
@@ -125,15 +138,20 @@ class HeadRecorder:
             confidence = [i.item() for i in confidence]
             return confidence, indices
 
-        assert self.use_root == True, f"Algorithm {algorithm} must use root."
+        # assert self.use_root == True, f"Algorithm {algorithm} must use root."
+
+        if not self.use_root:
+            length, _ = heads.shape
+            heads = torch.cat((torch.zeros(length, 1), heads), dim=1)
 
         if algorithm == 'nonprojective':
             indices = nonprojective_parse(heads)
             confidence = [heads[i, h].item() for i, h in enumerate(indices)]
             return confidence, indices
         elif algorithm == 'projective':
-            # TODO: Eisner algorithm codes. Or find a module related.
-            pass
+            indices = projective_parse(heads)
+            confidence = [heads[i, h].item() for i, h in enumerate(indices)]
+            return confidence, indices
 
         raise NotImplementedError(f"Algorithm {algorithm} is not implemented.")
 
@@ -214,11 +232,9 @@ class HeadRecorder:
         for i in range(length):
             idx = indices[i]
             conf = confidence[i]
-            if self.use_root:
-                if idx == 0:
-                    s += '    \\deproot{{{}}}{{ROOT ({:.2f})}}\n'.format(str(i+1), conf)
-                else:
-                    s += '    \\depedge{{{}}}{{{}}}{{{:.2f}}}\n'.format(str(idx), str(i+1), conf)
+            
+            if idx == 0:
+                s += '    \\deproot{{{}}}{{ROOT ({:.2f})}}\n'.format(str(i+1), conf)
             else:
                 s += '    \\depedge{{{}}}{{{}}}{{{:.2f}}}\n'.format(str(idx), str(i+1), conf)
         

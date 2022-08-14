@@ -1,6 +1,6 @@
 ## ================= MODIFY THE SETTING HERE =================
-SENTENCE = "The quick brown fox jumped over the lazy dog."
-ALGORITHM = 'argmax' # 'argmax', 'nonprojective'
+SENTENCE = "The quick brown fox jumped over the lazy dog ."
+ALGORITHM = 'projective' # 'argmax', 'nonprojective', 'projective'
 MODE = 'all' # 'all', 'average'
 ## ===========================================================
 
@@ -43,7 +43,7 @@ model_name = config["SequenceTagger"].pop("tagger", "CustomSequenceTagger")
 modelClass = utils.getattrs([models], model_name)
 tagger = modelClass.load(base_path / "best-model.pt")
 
-sentence = Sentence(SENTENCE)
+sentence = Sentence(SENTENCE, use_tokenizer=False)
 tagger.predict(sentence)
 
 # generate .tex file
