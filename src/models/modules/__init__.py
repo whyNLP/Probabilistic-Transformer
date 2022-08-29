@@ -14,7 +14,7 @@ from .xformer import EmbedResidualTransformerEncoder
 from .blockedHeadCRFEncoder import BlockHeadProbEncoder, DoubleBlockHeadProbEncoder, NoUnaryHeadProbEncoder
 from .neuralHeadCRFEncoder import NeuralHeadProbEncoder
 from .relativeTransformer import RelativeTransformerEncoder
-from .relativeHeadCRFEncoder import AddHeadProbEncoder, GaussianHeadProbEncoder, BernsteinHeadProbEncoder, GaussianLayerHeadProbEncoder, LogGaussianHeadProbEncoder, DecomposedHeadProbEncoder
+from .relativeHeadCRFEncoder import AddHeadProbEncoder, GaussianHeadProbEncoder, BernsteinHeadProbEncoder, GaussianLayerHeadProbEncoder, LogGaussianHeadProbEncoder, DecomposedHeadProbEncoder, FullyDecomposedHeadProbEncoder
 from .absoluteHeadCRFEncoder import AbsoluteHeadProbEncoder
 from .lazyHeadCRFEncoder import LazyHeadProbEncoder, HalfLazyHeadProbEncoder
 from .absGlobalHeadCRFEncoder import AbsGlobalHeadProbEncoder, AbsSingleGlobalHeadProbEncoder
