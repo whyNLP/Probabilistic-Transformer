@@ -6,7 +6,8 @@ from .transformer import (
     MultiHeadAttention, 
     PositionwiseFeedForward,
     AddPositionalEncoding,
-    COSPositionalEncoding
+    COSPositionalEncoding,
+    LCOSPositionalEncoding
 )
 
 
@@ -22,13 +23,79 @@ class EmbedResidualEncoderLayer(nn.Module):
 
     def forward(self, x, mask, x0):
         "Follow Figure 1 (left) for connections."
+        x = self.layer_norm[0](x + self.self_attn(x, mask))
+        return self.layer_norm[1](x + self.feed_forward(x))
+
+
+class EmbedResidualEncoderLayerAdd(nn.Module):
+    "Encoder is made up of self-attn and feed forward (defined below)"
+    def __init__(self, d_model=256, d_ff=1024, n_head=4, d_qkv=32,
+                dropout=0.1):
+        super(EmbedResidualEncoderLayerAdd, self).__init__()
+        self.self_attn = MultiHeadAttention(d_model, n_head, d_qkv, dropout)
+        self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.layer_norm = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(2)])
+        self.d_model = d_model
+
+    def forward(self, x, mask, x0):
+        "Follow Figure 1 (left) for connections."
         x = self.layer_norm[0](x + x0 + self.self_attn(x, mask))
         return self.layer_norm[1](x + x0 + self.feed_forward(x))
 
 
+class EmbedResidualEncoderLayerReplace(nn.Module):
+    "Encoder is made up of self-attn and feed forward (defined below)"
+    def __init__(self, d_model=256, d_ff=1024, n_head=4, d_qkv=32,
+                dropout=0.1):
+        super(EmbedResidualEncoderLayerReplace, self).__init__()
+        self.self_attn = MultiHeadAttention(d_model, n_head, d_qkv, dropout)
+        self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.layer_norm = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(2)])
+        self.d_model = d_model
+
+    def forward(self, x, mask, x0):
+        "Follow Figure 1 (left) for connections."
+        x = self.layer_norm[0](x0 + self.self_attn(x, mask))
+        return self.layer_norm[1](x0 + self.feed_forward(x))
+
+
+class EmbedResidualEncoderLayerAverage(nn.Module):
+    "Encoder is made up of self-attn and feed forward (defined below)"
+    def __init__(self, d_model=256, d_ff=1024, n_head=4, d_qkv=32,
+                dropout=0.1):
+        super(EmbedResidualEncoderLayerAverage, self).__init__()
+        self.self_attn = MultiHeadAttention(d_model, n_head, d_qkv, dropout)
+        self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.layer_norm = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(2)])
+        self.d_model = d_model
+
+    def forward(self, x, mask, x0):
+        "Follow Figure 1 (left) for connections."
+        x = self.layer_norm[0]((x + x0)*0.5 + self.self_attn(x, mask))
+        return self.layer_norm[1]((x + x0)*0.5 + self.feed_forward(x))
+
+
+class EmbedResidualEncoderLayerWeighted(nn.Module):
+    "Encoder is made up of self-attn and feed forward (defined below)"
+    def __init__(self, d_model=256, d_ff=1024, n_head=4, d_qkv=32,
+                dropout=0.1):
+        super(EmbedResidualEncoderLayerWeighted, self).__init__()
+        self.self_attn = MultiHeadAttention(d_model, n_head, d_qkv, dropout)
+        self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.layer_norm = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(2)])
+        self.d_model = d_model
+        self.weight = nn.Parameter(torch.zeros(2))
+
+    def forward(self, x, mask, x0):
+        "Follow Figure 1 (left) for connections."
+        p = torch.sigmoid(self.weight)
+        x = self.layer_norm[0](x * p[0] + x0 * (1-p[0]) + self.self_attn(x, mask))
+        return self.layer_norm[1](x * p[1] + x0 * (1-p[1]) + self.feed_forward(x))
+
+
 class EmbedResidualTransformerEncoder(nn.Module):
     def __init__(self, d_model=256, d_ff=1024, n_layers=4, n_head=4, d_qkv=32,
-                dropout=0.1, pos_embed='none'):
+                dropout=0.1, pos_embed='none', mode='none'):
         super().__init__()
         # Implementation tip: if you are storing nn.Module objects in a list, use
         # nn.ModuleList. If you use assignment statements of the form
@@ -51,8 +118,21 @@ class EmbedResidualTransformerEncoder(nn.Module):
             self.add_timing = AddPositionalEncoding(d_model=d_model)
         elif pos_embed == 'cos':
             self.add_timing = COSPositionalEncoding(d_model=d_model, max_len=512)
+        elif pos_embed == 'lcos':
+            self.add_timing = LCOSPositionalEncoding(d_model=d_model, max_len=512)
 
-        self.sublayers = nn.ModuleList([EmbedResidualEncoderLayer(d_model, d_ff, n_head, d_qkv, dropout) for _ in range(n_layers)])
+        if mode == 'none':
+            layer = EmbedResidualEncoderLayer
+        elif mode == 'add':
+            layer = EmbedResidualEncoderLayerAdd
+        elif mode == 'replace':
+            layer = EmbedResidualEncoderLayerReplace
+        elif mode == 'average':
+            layer = EmbedResidualEncoderLayerAverage
+        elif mode == 'weighted':
+            layer = EmbedResidualEncoderLayerWeighted
+
+        self.sublayers = nn.ModuleList([layer(d_model, d_ff, n_head, d_qkv, dropout) for _ in range(n_layers)])
 
     def forward(self, x, mask):
         """Runs the Transformer encoder.

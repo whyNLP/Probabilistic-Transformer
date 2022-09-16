@@ -159,6 +159,26 @@ class COSPositionalEncoding(nn.Module):
                          requires_grad=False)
         return self.dropout(x)
 
+class LCOSPositionalEncoding(nn.Module):
+    "Implement the learnable PE function."
+    def __init__(self, d_model=512, dropout=0.1, max_len=5000):
+        super(LCOSPositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        
+        # Compute the positional encodings once in log space.
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) *
+                             -(math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)
+        self.pe = nn.Parameter(pe)
+        
+    def forward(self, x):
+        x = x + self.pe[:, :x.size(1)]
+        return self.dropout(x)
+
 class TransformerEncoder(nn.Module):
     def __init__(self, d_model=256, d_ff=1024, n_layers=4, n_head=4, d_qkv=32,
                 dropout=0.1, pos_embed='none'):
@@ -184,6 +204,8 @@ class TransformerEncoder(nn.Module):
             self.add_timing = AddPositionalEncoding(d_model=d_model)
         elif pos_embed == 'cos':
             self.add_timing = COSPositionalEncoding(d_model=d_model, max_len=512)
+        elif pos_embed == 'lcos':
+            self.add_timing = LCOSPositionalEncoding(d_model=d_model, max_len=512)
 
         self.sublayers = nn.ModuleList([EncoderLayer(d_model, d_ff, n_head, d_qkv, dropout) for _ in range(n_layers)])
 
