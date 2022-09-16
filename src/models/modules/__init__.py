@@ -18,3 +18,4 @@ from .relativeHeadCRFEncoder import AddHeadProbEncoder, GaussianHeadProbEncoder,
 from .absoluteHeadCRFEncoder import AbsoluteHeadProbEncoder
 from .lazyHeadCRFEncoder import LazyHeadProbEncoder, HalfLazyHeadProbEncoder
 from .absGlobalHeadCRFEncoder import AbsGlobalHeadProbEncoder, AbsSingleGlobalHeadProbEncoder
+from .relativeGlobalCRFEncoder import DecomposedGlobalHeadProbEncoder
