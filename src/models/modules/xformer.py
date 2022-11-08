@@ -7,7 +7,8 @@ from .transformer import (
     PositionwiseFeedForward,
     AddPositionalEncoding,
     COSPositionalEncoding,
-    LCOSPositionalEncoding
+    LCOSPositionalEncoding,
+    EncoderLayer
 )
 
 
@@ -93,6 +94,25 @@ class EmbedResidualEncoderLayerWeighted(nn.Module):
         return self.layer_norm[1](x * p[1] + x0 * (1-p[1]) + self.feed_forward(x))
 
 
+class EmbedResidualEncoderLayerFreeWeighted(nn.Module):
+    "Encoder is made up of self-attn and feed forward (defined below)"
+    def __init__(self, d_model=256, d_ff=1024, n_head=4, d_qkv=32,
+                dropout=0.1):
+        super(EmbedResidualEncoderLayerFreeWeighted, self).__init__()
+        self.self_attn = MultiHeadAttention(d_model, n_head, d_qkv, dropout)
+        self.feed_forward = PositionwiseFeedForward(d_model, d_ff, dropout)
+        self.layer_norm = nn.ModuleList([nn.LayerNorm(d_model) for _ in range(2)])
+        self.d_model = d_model
+        # self.weight = nn.Parameter(torch.tensor([1., 0., 1., 0.]))
+        self.weight = nn.Parameter(torch.tensor([.5, .5, .5, .5]))
+
+    def forward(self, x, mask, x0):
+        "Follow Figure 1 (left) for connections."
+        p = self.weight
+        x = self.layer_norm[0](x * p[0] + x0 * p[1] + self.self_attn(x, mask))
+        return self.layer_norm[1](x * p[2] + x0 * p[3] + self.feed_forward(x))
+
+
 class EmbedResidualTransformerEncoder(nn.Module):
     def __init__(self, d_model=256, d_ff=1024, n_layers=4, n_head=4, d_qkv=32,
                 dropout=0.1, pos_embed='none', mode='none'):
@@ -131,6 +151,11 @@ class EmbedResidualTransformerEncoder(nn.Module):
             layer = EmbedResidualEncoderLayerAverage
         elif mode == 'weighted':
             layer = EmbedResidualEncoderLayerWeighted
+        elif mode == 'free-weighted':
+            layer = EmbedResidualEncoderLayerFreeWeighted
+        elif mode == 'prior-weighted':
+            self.sublayers = nn.ModuleList([EmbedResidualEncoderLayer(d_model, d_ff, n_head, d_qkv, dropout) for _ in range(n_layers-1)] + [EmbedResidualEncoderLayerReplace(d_model, d_ff, n_head, d_qkv, dropout)])
+            return
 
         self.sublayers = nn.ModuleList([layer(d_model, d_ff, n_head, d_qkv, dropout) for _ in range(n_layers)])
 

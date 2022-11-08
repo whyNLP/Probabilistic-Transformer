@@ -311,6 +311,19 @@ class MaskedLanguageModelTrainer(ModelTrainer):
             for group in optimizer.param_groups:
                 if "momentum" in group:
                     momentum = group["momentum"]
+            
+            # Print out the initial loss.
+            if log_dev:
+                dev_eval_result, dev_loss = self.model.evaluate(
+                    self.mask_dataset(self.corpus.dev, fix_random=fix_dev_mask, use_bucket=use_bucket),
+                    mini_batch_size=mini_batch_chunk_size,
+                    num_workers=num_workers,
+                    out_path=base_path / "dev.tsv" if output_prediction else None,
+                    embedding_storage_mode=embeddings_storage_mode,
+                )
+                log.info(
+                    f"DEV : loss {dev_loss} - score {round(dev_eval_result.main_score, 4)}"
+                )
 
             for self.epoch in range(self.epoch + 1, max_epochs + 1):
                 log_line(log)

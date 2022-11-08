@@ -274,3 +274,83 @@ class RelativeTransformerEncoder(nn.Module):
 
     def extra_repr(self) -> str:
         return ", ".join(["{}={}".format(k,v) for k,v in self._get_hyperparams().items()])
+
+
+class UniversalRelativeTransformerEncoder(nn.Module):
+    def __init__(self, d_model=256, d_ff=1024, n_layers=4, n_head=4, d_qkv=32,
+                dropout=0.1, pos_embed='none', e_length=5, mode='k'):
+        super().__init__()
+        # Implementation tip: if you are storing nn.Module objects in a list, use
+        # nn.ModuleList. If you use assignment statements of the form
+        # `self.sublayers = [x, y, z]` with a plain python list instead of a
+        # ModuleList, you might find that none of the sub-layer parameters are
+        # trained.
+
+        """YOUR CODE HERE"""
+        self.d_model = d_model
+        self.d_ff = d_ff
+        self.n_layers = n_layers
+        self.n_head = n_head
+        self.d_qkv = d_qkv
+        self.dropout = dropout
+        self.pos_embed = pos_embed
+        self.e_length = e_length
+        self.mode = mode
+
+        if pos_embed == 'none':
+            self.add_timing = lambda x: x
+        elif pos_embed == 'add':
+            self.add_timing = AddPositionalEncoding(d_model=d_model)
+        elif pos_embed == 'cos':
+            self.add_timing = COSPositionalEncoding(d_model=d_model, max_len=512)
+
+        self.sublayer = EncoderLayer(d_model, d_ff, n_head, d_qkv, dropout, e_length, mode)
+
+    def forward(self, x, mask):
+        """Runs the Transformer encoder.
+
+        Args:
+        x: the input to the Transformer, a tensor of shape
+            [batch size, length, d_model]
+        mask: a mask for disallowing attention to padding tokens. You will need to
+                construct the mask yourself further on in this notebook. You may
+                implement masking in any way; there is no requirement that you use
+                a particular form for the mask object.
+        Returns:
+        A single tensor containing the output from the Transformer
+            [batch size, length, d_model]
+        """
+
+        """YOUR CODE HERE"""
+        x = self.add_timing(x)
+
+        if DRAW:
+
+            self.recorder = HeadRecorder(use_root=False)
+            for i in range(self.n_layers):
+                x = self.sublayer(x, mask)
+                self.recorder[i] = self.sublayer.self_attn.p_attn
+        
+        else:
+
+            for i in range(self.n_layers):
+                x = self.sublayer(x, mask)
+        
+        return x
+
+    def _get_hyperparams(self):
+        model_hps = {
+            "d_model": self.d_model,
+            "d_ff": self.d_ff,
+            "n_layers": self.n_layers,
+            "n_head": self.n_head,
+            "d_qkv": self.d_qkv,
+            "dropout": self.dropout,
+            "pos_embed": self.pos_embed,
+            "e_length": self.e_length,
+            "mode": self.mode
+        }
+        return model_hps
+
+    def extra_repr(self) -> str:
+        return ", ".join(["{}={}".format(k,v) for k,v in self._get_hyperparams().items()])
