@@ -11,6 +11,7 @@ from .globalHeadCRFEncoder import GlobalHeadProbEncoder, SingleGlobalHeadProbEnc
 from .transformer import MultiHeadEncoder, UniversalTransformerEncoder
 from .wordCRFEncoder import WordProbEncoder
 from .xformer import EmbedResidualTransformerEncoder
+from .deformer import DeTransformerEncoder
 from .blockedHeadCRFEncoder import BlockHeadProbEncoder, DoubleBlockHeadProbEncoder, NoUnaryHeadProbEncoder
 from .neuralHeadCRFEncoder import NeuralHeadProbEncoder
 from .relativeTransformer import RelativeTransformerEncoder, UniversalRelativeTransformerEncoder
