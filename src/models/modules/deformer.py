@@ -79,7 +79,7 @@ class MultiHeadAttention(nn.Module):
 
         p_attn = self.dropout_s(p_attn)
         
-        x = oe.contract('bhij,mr,nr,hr,bim->bjn', *[p_attn, *self.w_vo, x], optimize='optimal')
+        x = oe.contract('bhij,mr,nr,hr,bjn->bim', *[p_attn, *self.w_vo, x], optimize='optimal')
         return self.dropout_o(x) # (batch size, length, d_model)
 
     def _get_hyperparams(self):
