@@ -8,7 +8,7 @@ from .rootedHeadCRFEncoder import SharedRootedHeadProbEncoder, RootedHeadProbEnc
 from .multiZheadCRFEncoder import MultiZHeadProbEncoder
 from .headWordCRFEncoder import HeadWordProbEncoder, PseudoHeadWordProbEncoder
 from .globalHeadCRFEncoder import GlobalHeadProbEncoder, SingleGlobalHeadProbEncoder
-from .transformer import MultiHeadEncoder, UniversalTransformerEncoder
+from .transformer import MultiHeadEncoder, UniversalTransformerEncoder, PreLNTransformerEncoder
 from .wordCRFEncoder import WordProbEncoder
 from .xformer import EmbedResidualTransformerEncoder
 from .deformer import DeTransformerEncoder
