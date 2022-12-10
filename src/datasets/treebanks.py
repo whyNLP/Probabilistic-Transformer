@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import List, Union
 from collections import Counter
 import os
+import json
+import random
 
 from torch.utils.data.dataset import ConcatDataset, Subset
 
@@ -15,7 +17,7 @@ from flair.data import (
     FlairDataset,
     randomly_split_into_two_datasets
 )
-from flair.datasets import ColumnDataset
+from flair.datasets import ColumnDataset, UniversalDependenciesDataset
 from flair.file_utils import cached_path, unpack_file
 
 import nltk
@@ -272,8 +274,7 @@ class BLLIPCorpus(Corpus):
             dataset = ColumnDataset(cache_path / "raw.conll", column_name_map=column_name_map, column_delimiter="\t", in_memory=in_memory)
 
             # randomly split the dataset
-            # We split test set first. If we set the random seed, we can obtain the same test
-            # set whild changing the training set size.
+            # We split test set first. If we set the random seed, we can obtain the same test set while changing the training set size.
             test, dataset = randomly_split_into_two_datasets(dataset, test_set_size)
             dev, dataset = randomly_split_into_two_datasets(dataset, dev_set_size)
             train, dataset = randomly_split_into_two_datasets(dataset, train_set_size)
@@ -386,4 +387,98 @@ class BLLIPCorpus(Corpus):
             fsync(f_train_lg, "train_lg.conll")
             fsync(f_dev, "dev.conll")
             fsync(f_test, "test.conll")
-        
+
+
+class CFQ_Dependency(Corpus):
+    def __init__(self, base_path: Union[str, Path] = None, split: str = "random", use_dev: bool = True, in_memory: bool = False, split_multiwords: bool = True):
+        """
+        A dependency parsing version of Compositional Freebase Questions (CFQ) challenge.
+        Proposed in papaer Compositional Generalization in Dependency Parsing (Goodwin et al.)
+        See details at https://aclanthology.org/2022.acl-long.448/
+
+        :param split: Dataset split. Options: 'mcd1', 'mcd2', 'mcd3', 'random'. Default: 'random'.
+            * Hidden options: 'question_complexity', 'question_pattern', 'query_complexity', 'query_pattern'.
+              Not recommended in this setting.
+        :param use_dev: Use the official dev set. In the paper above, the author argues that the
+            original dev split has the same distribution as the test set, which results in leaking
+            the information of the test distribution. If set to False, then randomly pick 20% samples
+            from the train set as the dev set. Notice that this may result in different splits on
+            different devices. Though the result should not be affected too much.
+        """
+
+        if type(base_path) == str:
+            base_path: Path = Path(base_path)
+
+        # this dataset name
+        dataset_name = self.__class__.__name__.lower()
+
+        # default dataset folder is the cache root
+        if not base_path:
+            base_path = Path(flair.cache_root) / "datasets"
+        data_folder = base_path / dataset_name
+
+        # download data if necessary
+        web_path = "https://github.com/emilygoodwin/CFQ-dependencies/raw/main/parsed-CFQ-corpus.conllu"
+        cached_path(web_path, Path("datasets") / dataset_name)
+
+        tar_folder = data_folder / "cfq"
+
+        if not tar_folder.is_dir():
+
+            tar_path = "https://storage.googleapis.com/cfq_dataset/cfq.tar.gz"
+            tar_path = cached_path(tar_path, Path("datasets") / dataset_name)
+
+            unpack_file(tar_path, data_folder, mode="targz", keep=False)
+
+        # determine split
+        if split == "mcd1":
+            split_file = tar_folder / "splits" / "mcd1.json"
+        elif split == "mcd2":
+            split_file = tar_folder / "splits" / "mcd2.json"
+        elif split == "mcd3":
+            split_file = tar_folder / "splits" / "mcd3.json"
+        elif split == "random":
+            split_file = tar_folder / "splits" / "random_split.json"
+        else:
+            split_file = tar_folder / "splits" / f"{split}_split.json"
+
+        with open(split_file, 'r') as f:
+            indices = json.loads(f.read())
+
+        if use_dev:
+            train_set = indices["trainIdxs"]
+            dev_set = indices["devIdxs"]
+            test_set = indices["testIdxs"]
+        else:
+            all_train_set = indices["trainIdxs"]
+            test_set = indices["testIdxs"]
+            train_length = len(all_train_set)
+            dev_size: int = round(train_length / 5)
+
+            # randomly pick 20% as dev set
+            # fix the random result by setting the random seed
+            shuffler = random.Random(125) # My mom's birthday. A lucky number.
+            indices = [i for i in range(train_length)]
+            shuffler.shuffle(indices)
+            dev_set = indices[:dev_size]
+            train_set = indices[dev_size:]
+            dev_set.sort()
+            train_set.sort()
+
+        dataset_all = UniversalDependenciesDataset(base_path / dataset_name / "parsed-CFQ-corpus.conllu", in_memory=in_memory, split_multiwords=split_multiwords)
+
+        super(CFQ_Dependency, self).__init__(
+            train=Subset(dataset_all, train_set),
+            dev=Subset(dataset_all, dev_set),
+            test=Subset(dataset_all, test_set),
+            name=str(data_folder)
+        )
+    
+    def make_tag_dictionary(self, tag_type: str) -> Dictionary:
+
+        # Make the tag dictionary
+        tag_dictionary: Dictionary = Dictionary(add_unk=False)
+        for sentence in self.get_all_sentences():
+            for token in sentence.tokens:
+                tag_dictionary.add_item(token.get_tag(tag_type).value)
+        return tag_dictionary
