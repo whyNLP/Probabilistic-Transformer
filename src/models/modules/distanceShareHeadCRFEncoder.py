@@ -776,9 +776,18 @@ class DistanceShareHeadProbEncoder(nn.Module):
         return q_z
     
     def getTernaryNorm(self, p):
+
         ## Recover ternary score
         if self.use_td.startswith('uv:'):
-            ternary = oe.contract('kadc,kbdc->kabc', *[self.U, self.V], backend='torch')
+            U = torch.cat((
+                self.U1.unsqueeze(0).repeat_interleave(2*(len(self._dists)+1), dim=0), 
+                self.U2.unsqueeze(1).unsqueeze(-1).repeat_interleave(self.n_head, dim=-1)
+            ), dim=1)
+            V = torch.cat((
+                self.V1.unsqueeze(0).repeat_interleave(2*(len(self._dists)+1), dim=0), 
+                self.V2.unsqueeze(1).unsqueeze(-1).repeat_interleave(self.n_head, dim=-1)
+            ), dim=1)
+            ternary = oe.contract('kadc,kbdc->kabc', *[U, V], backend='torch')
         elif self.use_td.startswith('uvw:'):
             ternary = oe.contract('kad,kbd,kcd->kabc', *[self.U, self.V, self.W], backend='torch')
         else:
