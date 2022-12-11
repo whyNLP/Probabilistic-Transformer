@@ -541,22 +541,24 @@ class DistanceShareHeadProbEncoder(nn.Module):
 
         ## Recover ternary score
         if self.use_td.startswith('uv:'):
-            rank = int(self.use_td.split(':')[-1])
-            ## Recover U and V
-            # U = torch.cat((
-            #     self.U1.unsqueeze(0).repeat_interleave(2*(len(self._dists)+1), dim=0), 
-            #     self.U2.unsqueeze(1).unsqueeze(-1).repeat_interleave(self.n_head, dim=-1)
-            # ), dim=1)
-            # V = torch.cat((
-            #     self.V1.unsqueeze(0).repeat_interleave(2*(len(self._dists)+1), dim=0), 
-            #     self.V2.unsqueeze(1).unsqueeze(-1).repeat_interleave(self.n_head, dim=-1)
-            # ), dim=1)
+            # rank = int(self.use_td.split(':')[-1])
 
-            # expr_F0 = oe.contract_expression('zia,zjb,kadc,kbdc,kij->zcij',*[unary.shape, unary.shape, U, V, distmask], constants=[2,3,4], optimize='optimal')
-            # expr_G10 = oe.contract_expression('zjb,zcij,kadc,kbdc,kij->zia', *[unary.shape, (batch_size, self.n_head, max_len, max_len), U, V, distmask], constants=[2,3,4], optimize='optimal')
-            # expr_G20 = oe.contract_expression('zjb,zcji,kbdc,kadc,kji->zia', *[unary.shape, (batch_size, self.n_head, max_len, max_len), U, V, distmask], constants=[2,3,4], optimize='optimal')
+            ## Recover U and V
+            U = torch.cat((
+                self.U1.unsqueeze(0).repeat_interleave(2*(len(self._dists)+1), dim=0), 
+                self.U2.unsqueeze(1).unsqueeze(-1).repeat_interleave(self.n_head, dim=-1)
+            ), dim=1)
+            V = torch.cat((
+                self.V1.unsqueeze(0).repeat_interleave(2*(len(self._dists)+1), dim=0), 
+                self.V2.unsqueeze(1).unsqueeze(-1).repeat_interleave(self.n_head, dim=-1)
+            ), dim=1)
+
+            # expr_F = oe.contract_expression('zia,zjb,kadc,kbdc,kij->zcij',*[unary.shape, unary.shape, U, V, distmask], constants=[2,3,4], optimize='optimal')
+            expr_G1 = oe.contract_expression('zjb,zcij,kadc,kbdc,kij->zia', *[unary.shape, (batch_size, self.n_head, max_len, max_len), U, V, distmask], constants=[2,3,4], optimize='optimal')
+            expr_G2 = oe.contract_expression('zjb,zcji,kbdc,kadc,kji->zia', *[unary.shape, (batch_size, self.n_head, max_len, max_len), U, V, distmask], constants=[2,3,4], optimize='optimal')
 
             # Calculate expr_F
+            # Only this accelerates the training?! why...
             def expr_F(x: torch.Tensor, *args, **kwargs):
                 """
                 :param x: tensor of shape [batch_size, seq_length, embedding_size]
@@ -568,20 +570,6 @@ class DistanceShareHeadProbEncoder(nn.Module):
             expr_F.expr3 = oe.contract_expression('zia,adc,kd,zj,kij->zcij', *[(batch_size, max_len, self.d_model-1), self.U1, self.V2, (batch_size, max_len), distmask], constants=[1,2,4], optimize='optimal')
             expr_F.expr4 = oe.contract_expression('zi,kd,kd,zj,kij->zij', *[(batch_size, max_len), self.U2, self.V2, (batch_size, max_len), distmask], constants=[1,2,4], optimize='optimal')
 
-            # def expr_F(x: torch.Tensor, *args, **kwargs):
-            #     """
-            #     :param x: tensor of shape [batch_size, seq_length, embedding_size]
-            #     """
-            #     x_most, x_last = x[...,:-1], x[...,-1]
-            #     q_most, q_last = torch.einsum('zia,adc->zcid', [x_most, self.U1]), oe.contract('zi,kd,kij->zijd', *[x_last, self.U2, distmask])
-            #     k_most, k_last = torch.einsum('zib,bdc->zcid', [x_most, self.V1]), oe.contract('zj,kd,kij->zijd', *[x_last, self.V2, distmask])
-            #     expr1 = oe.contract('zcid,zcjd,kij->zcij', *[q_most, k_most, distmask])
-            #     expr2 = torch.einsum('zijd,zcjd->zcij', [q_last, k_most])
-            #     expr3 = torch.einsum('zcid,zijd->zcij', [q_most, k_last])
-            #     expr4 = torch.einsum('zijd,zijd->zij', [q_last, k_last])
-            #     return expr1 + expr2 + expr3 + expr4.unsqueeze(1)
-
-
             # def expr_G1(x: torch.Tensor, h: torch.Tensor, **kwargs):
             #     """
             #     :param x: tensor of shape [batch_size, seq_length, embedding_size]
@@ -589,104 +577,47 @@ class DistanceShareHeadProbEncoder(nn.Module):
             #     """
             #     x_most, x_last = x[...,:-1], x[...,-1]
 
-            #     # expr1 = oe.contract('zcij,zjb,bdc,adc,kij->zia', *[h, x_most, self.V1, self.U1, distmask], optimize='optimal')
-            #     # expr2 = oe.contract('zcij,zj,kd,adc,kij->zia', *[h, x_last, self.V2, self.U1, distmask], optimize='optimal')
-            #     # expr3 = oe.contract('zcij,zjb,bdc,kd,kij->zi', *[h, x_most, self.V1, self.U2, distmask], optimize='optimal')
-            #     # expr4 = oe.contract('zcij,zj,kd,kd,kij->zi', *[h, x_last, self.V2, self.U2, distmask], optimize='optimal')
-            #     # return torch.cat((
-            #     #     expr1 + expr2,
-            #     #     (expr3 + expr4).unsqueeze(-1)
-            #     # ), dim=-1)
+            #     v_most = torch.einsum('zjb,bdc->zcjd', [x_most, self.V1])
+            #     expr1 = expr_G1.expr1(h, v_most)
+            #     expr2 = expr_G1.expr2(h, x_last)
+            #     expr12 = oe.contract('zicd,adc->zia', *[expr1 + expr2, self.U1])
+            #     expr3 = expr_G1.expr3(h, v_most)
+            #     expr4 = expr_G1.expr4(h, x_last)
+            #     expr34 = (expr3 + expr4).unsqueeze(-1)
 
-            #     return torch.cat((
-            #         expr_G1.expr1(h, x_most) + expr_G1.expr2(h, x_last),
-            #         (expr_G1.expr3(h, x_most) + expr_G1.expr4(h, x_last)).unsqueeze(-1)
-            #     ), dim=-1)
-            # expr_G1.expr1 = oe.contract_expression('zcij,zjb,bdc,adc,kij->zia', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.V1, self.U1, distmask], constants=[2,3,4], optimize='optimal')
-            # expr_G1.expr2 = oe.contract_expression('zcij,zj,kd,adc,kij->zia', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, self.U1, distmask], constants=[2,3,4], optimize='optimal')
-            # expr_G1.expr3 = oe.contract_expression('zcij,zjb,bdc,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.V1, self.U2, distmask], constants=[2,3,4], optimize='optimal')
+            #     return torch.cat((expr12, expr34), dim=-1)
+            # expr_G1.expr1 = oe.contract_expression('zcij,zcjd,kij->zicd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), distmask], constants=[2], optimize='optimal')
+            # expr_G1.expr2 = oe.contract_expression('zcij,zj,kd,kij->zicd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, distmask], constants=[2,3], optimize='optimal')
+            # expr_G1.expr3 = oe.contract_expression('zcij,zcjd,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), self.U2, distmask], constants=[2,3], optimize='optimal')
             # expr_G1.expr4 = oe.contract_expression('zcij,zj,kd,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, self.U2, distmask], constants=[2,3,4], optimize='optimal')
 
-            def expr_G1(x: torch.Tensor, h: torch.Tensor, **kwargs):
-                """
-                :param x: tensor of shape [batch_size, seq_length, embedding_size]
-                :param h: tensor of shape [batch_size, num_heads, seq_length, seq_length]
-                """
-                x_most, x_last = x[...,:-1], x[...,-1]
+            # def expr_G2(x: torch.Tensor, h: torch.Tensor, **kwargs):
+            #     """
+            #     :param x: tensor of shape [batch_size, seq_length, embedding_size]
+            #     :param h: tensor of shape [batch_size, num_heads, seq_length, seq_length]
+            #     """
+            #     x_most, x_last = x[...,:-1], x[...,-1]
 
-                # v_most = torch.einsum('zjb,bdc->zcjd', [x_most, self.V1])
-                # expr1 = oe.contract('zcij,zcjd,kij->zicd', *[h, v_most, distmask], optimize='optimal')
-                # expr2 = oe.contract('zcij,zj,kd,kij->zicd', *[h, x_last, self.V2, distmask], optimize='optimal')
-                # expr12 = oe.contract('zicd,adc->zia', *[expr1 + expr2, self.U1])
+            #     o_most = torch.einsum('zia,adc->zcid', [x_most, self.U1])
+            #     expr1 = expr_G2.expr1(h, o_most)
+            #     expr2 = expr_G2.expr2(h, x_last)
+            #     expr12 = oe.contract('zjcd,bdc->zjb', *[expr1 + expr2, self.V1])
+            #     expr3 = expr_G2.expr3(h, o_most)
+            #     expr4 = expr_G2.expr4(h, x_last)
+            #     expr34 = (expr3 + expr4).unsqueeze(-1)
 
-                # expr3 = oe.contract('zcij,zcjd,kd,kij->zi', *[h, v_most, self.U2, distmask], optimize='optimal')
-                # expr4 = oe.contract('zcij,zj,kd,kd,kij->zi', *[h, x_last, self.V2, self.U2, distmask], optimize='optimal')
-                # return torch.cat((
-                #     expr12,
-                #     (expr3 + expr4).unsqueeze(-1)
-                # ), dim=-1)
+            #     return torch.cat((expr12, expr34), dim=-1)
+            # expr_G2.expr1 = oe.contract_expression('zcij,zcid,kij->zjcd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), distmask], constants=[2], optimize='optimal')
+            # expr_G2.expr2 = oe.contract_expression('zcij,zi,kd,kij->zjcd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.U2, distmask], constants=[2,3], optimize='optimal')
+            # expr_G2.expr3 = oe.contract_expression('zcij,zcid,kd,kij->zj', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), self.V2, distmask], constants=[2,3], optimize='optimal')
+            # expr_G2.expr4 = oe.contract_expression('zcij,zi,kd,kd,kij->zj', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.U2, self.V2, distmask], constants=[2,3,4], optimize='optimal')
 
-                v_most = torch.einsum('zjb,bdc->zcjd', [x_most, self.V1])
-                expr1 = expr_G1.expr1(h, v_most)
-                expr2 = expr_G1.expr2(h, x_last)
-                expr12 = oe.contract('zicd,adc->zia', *[expr1 + expr2, self.U1])
-                expr3 = expr_G1.expr3(h, v_most)
-                expr4 = expr_G1.expr4(h, x_last)
-
-                return torch.cat((
-                    expr12,
-                    (expr3 + expr4).unsqueeze(-1)
-                ), dim=-1)
-
-
-                # expr1 = oe.contract('zcij,zjb,bdc,adc,kij->zia', *[h, x_most, self.V1, self.U1, distmask], optimize='optimal')
-                # expr2 = oe.contract('zcij,zj,kd,adc,kij->zia', *[h, x_last, self.V2, self.U1, distmask], optimize='optimal')
-                # expr3 = oe.contract('zcij,zjb,bdc,kd,kij->zi', *[h, x_most, self.V1, self.U2, distmask], optimize='optimal')
-                # expr4 = oe.contract('zcij,zj,kd,kd,kij->zi', *[h, x_last, self.V2, self.U2, distmask], optimize='optimal')
-                # return torch.cat((
-                #     expr1 + expr2,
-                #     (expr3 + expr4).unsqueeze(-1)
-                # ), dim=-1)
-
-                # return torch.cat((
-                #     expr_G1.expr1(h, x_most) + expr_G1.expr2(h, x_last),
-                #     (expr_G1.expr3(h, x_most) + expr_G1.expr4(h, x_last)).unsqueeze(-1)
-                # ), dim=-1)
-            expr_G1.expr1 = oe.contract_expression('zcij,zcjd,kij->zicd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), distmask], constants=[2], optimize='optimal')
-            expr_G1.expr2 = oe.contract_expression('zcij,zj,kd,kij->zicd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, distmask], constants=[2,3], optimize='optimal')
-            expr_G1.expr3 = oe.contract_expression('zcij,zcjd,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), self.U2, distmask], constants=[2,3], optimize='optimal')
-            expr_G1.expr4 = oe.contract_expression('zcij,zj,kd,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, self.U2, distmask], constants=[2,3,4], optimize='optimal')
-
-            def expr_G2(x: torch.Tensor, h: torch.Tensor, **kwargs):
-                """
-                :param x: tensor of shape [batch_size, seq_length, embedding_size]
-                :param h: tensor of shape [batch_size, num_heads, seq_length, seq_length]
-                """
-                x_most, x_last = x[...,:-1], x[...,-1]
-
-                # expr1 = oe.contract('zcij,zia,adc,bdc,kij->zjb', *[h, x_most, self.U1, self.V1, distmask], optimize='optimal')
-                # expr2 = oe.contract('zcij,zi,kd,bdc,kij->zjb', *[h, x_last, self.U2, self.V1, distmask], optimize='optimal')
-                # expr3 = oe.contract('zcij,zia,adc,kd,kij->zj', *[h, x_most, self.U1, self.V2, distmask], optimize='optimal')
-                # expr4 = oe.contract('zcij,zi,kd,kd,kij->zj', *[h, x_last, self.U2, self.V2, distmask], optimize='optimal')
-                # return torch.cat((
-                #     expr1 + expr2,
-                #     (expr3 + expr4).unsqueeze(-1)
-                # ), dim=-1)
-
-                return torch.cat((
-                    expr_G2.expr1(h, x_most) + expr_G2.expr2(h, x_last),
-                    (expr_G2.expr3(h, x_most) + expr_G2.expr4(h, x_last)).unsqueeze(-1)
-                ), dim=-1)
-            expr_G2.expr1 = oe.contract_expression('zcij,zia,adc,bdc,kij->zjb', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.U1, self.V1, distmask], constants=[2,3,4], optimize='optimal')
-            expr_G2.expr2 = oe.contract_expression('zcij,zi,kd,bdc,kij->zjb', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.U2, self.V1, distmask], constants=[2,3,4], optimize='optimal')
-            expr_G2.expr3 = oe.contract_expression('zcij,zia,adc,kd,kij->zj', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.U1, self.V2, distmask], constants=[2,3,4], optimize='optimal')
-            expr_G2.expr4 = oe.contract_expression('zcij,zi,kd,kd,kij->zj', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.U2, self.V2, distmask], constants=[2,3,4], optimize='optimal')
-
+            # Codes for testing
             # t = unary.softmax(dim=-1)
             # t = torch.randn_like(unary).to(device=x.device).softmax(dim=-1)
             # h = torch.randn(batch_size, self.n_head, max_len, max_len).to(device=x.device).softmax(dim=-1)
             # # diff = expr_F0(t) - expr_F(t)
-            # diff = expr_G10(t, h) - expr_G1(t, h)
+            # diff = expr_G20(t, h) - expr_G2(t, h)
             # print(diff.norm(p=2))
             # exit()
 
