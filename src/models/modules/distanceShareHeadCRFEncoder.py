@@ -541,6 +541,7 @@ class DistanceShareHeadProbEncoder(nn.Module):
 
         ## Recover ternary score
         if self.use_td.startswith('uv:'):
+            rank = int(self.use_td.split(':')[-1])
             ## Recover U and V
             # U = torch.cat((
             #     self.U1.unsqueeze(0).repeat_interleave(2*(len(self._dists)+1), dim=0), 
@@ -581,12 +582,62 @@ class DistanceShareHeadProbEncoder(nn.Module):
             #     return expr1 + expr2 + expr3 + expr4.unsqueeze(1)
 
 
+            # def expr_G1(x: torch.Tensor, h: torch.Tensor, **kwargs):
+            #     """
+            #     :param x: tensor of shape [batch_size, seq_length, embedding_size]
+            #     :param h: tensor of shape [batch_size, num_heads, seq_length, seq_length]
+            #     """
+            #     x_most, x_last = x[...,:-1], x[...,-1]
+
+            #     # expr1 = oe.contract('zcij,zjb,bdc,adc,kij->zia', *[h, x_most, self.V1, self.U1, distmask], optimize='optimal')
+            #     # expr2 = oe.contract('zcij,zj,kd,adc,kij->zia', *[h, x_last, self.V2, self.U1, distmask], optimize='optimal')
+            #     # expr3 = oe.contract('zcij,zjb,bdc,kd,kij->zi', *[h, x_most, self.V1, self.U2, distmask], optimize='optimal')
+            #     # expr4 = oe.contract('zcij,zj,kd,kd,kij->zi', *[h, x_last, self.V2, self.U2, distmask], optimize='optimal')
+            #     # return torch.cat((
+            #     #     expr1 + expr2,
+            #     #     (expr3 + expr4).unsqueeze(-1)
+            #     # ), dim=-1)
+
+            #     return torch.cat((
+            #         expr_G1.expr1(h, x_most) + expr_G1.expr2(h, x_last),
+            #         (expr_G1.expr3(h, x_most) + expr_G1.expr4(h, x_last)).unsqueeze(-1)
+            #     ), dim=-1)
+            # expr_G1.expr1 = oe.contract_expression('zcij,zjb,bdc,adc,kij->zia', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.V1, self.U1, distmask], constants=[2,3,4], optimize='optimal')
+            # expr_G1.expr2 = oe.contract_expression('zcij,zj,kd,adc,kij->zia', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, self.U1, distmask], constants=[2,3,4], optimize='optimal')
+            # expr_G1.expr3 = oe.contract_expression('zcij,zjb,bdc,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.V1, self.U2, distmask], constants=[2,3,4], optimize='optimal')
+            # expr_G1.expr4 = oe.contract_expression('zcij,zj,kd,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, self.U2, distmask], constants=[2,3,4], optimize='optimal')
+
             def expr_G1(x: torch.Tensor, h: torch.Tensor, **kwargs):
                 """
                 :param x: tensor of shape [batch_size, seq_length, embedding_size]
                 :param h: tensor of shape [batch_size, num_heads, seq_length, seq_length]
                 """
                 x_most, x_last = x[...,:-1], x[...,-1]
+
+                # v_most = torch.einsum('zjb,bdc->zcjd', [x_most, self.V1])
+                # expr1 = oe.contract('zcij,zcjd,kij->zicd', *[h, v_most, distmask], optimize='optimal')
+                # expr2 = oe.contract('zcij,zj,kd,kij->zicd', *[h, x_last, self.V2, distmask], optimize='optimal')
+                # expr12 = oe.contract('zicd,adc->zia', *[expr1 + expr2, self.U1])
+
+                # expr3 = oe.contract('zcij,zcjd,kd,kij->zi', *[h, v_most, self.U2, distmask], optimize='optimal')
+                # expr4 = oe.contract('zcij,zj,kd,kd,kij->zi', *[h, x_last, self.V2, self.U2, distmask], optimize='optimal')
+                # return torch.cat((
+                #     expr12,
+                #     (expr3 + expr4).unsqueeze(-1)
+                # ), dim=-1)
+
+                v_most = torch.einsum('zjb,bdc->zcjd', [x_most, self.V1])
+                expr1 = expr_G1.expr1(h, v_most)
+                expr2 = expr_G1.expr2(h, x_last)
+                expr12 = oe.contract('zicd,adc->zia', *[expr1 + expr2, self.U1])
+                expr3 = expr_G1.expr3(h, v_most)
+                expr4 = expr_G1.expr4(h, x_last)
+
+                return torch.cat((
+                    expr12,
+                    (expr3 + expr4).unsqueeze(-1)
+                ), dim=-1)
+
 
                 # expr1 = oe.contract('zcij,zjb,bdc,adc,kij->zia', *[h, x_most, self.V1, self.U1, distmask], optimize='optimal')
                 # expr2 = oe.contract('zcij,zj,kd,adc,kij->zia', *[h, x_last, self.V2, self.U1, distmask], optimize='optimal')
@@ -597,13 +648,13 @@ class DistanceShareHeadProbEncoder(nn.Module):
                 #     (expr3 + expr4).unsqueeze(-1)
                 # ), dim=-1)
 
-                return torch.cat((
-                    expr_G1.expr1(h, x_most) + expr_G1.expr2(h, x_last),
-                    (expr_G1.expr3(h, x_most) + expr_G1.expr4(h, x_last)).unsqueeze(-1)
-                ), dim=-1)
-            expr_G1.expr1 = oe.contract_expression('zcij,zjb,bdc,adc,kij->zia', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.V1, self.U1, distmask], constants=[2,3,4], optimize='optimal')
-            expr_G1.expr2 = oe.contract_expression('zcij,zj,kd,adc,kij->zia', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, self.U1, distmask], constants=[2,3,4], optimize='optimal')
-            expr_G1.expr3 = oe.contract_expression('zcij,zjb,bdc,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.V1, self.U2, distmask], constants=[2,3,4], optimize='optimal')
+                # return torch.cat((
+                #     expr_G1.expr1(h, x_most) + expr_G1.expr2(h, x_last),
+                #     (expr_G1.expr3(h, x_most) + expr_G1.expr4(h, x_last)).unsqueeze(-1)
+                # ), dim=-1)
+            expr_G1.expr1 = oe.contract_expression('zcij,zcjd,kij->zicd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), distmask], constants=[2], optimize='optimal')
+            expr_G1.expr2 = oe.contract_expression('zcij,zj,kd,kij->zicd', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, distmask], constants=[2,3], optimize='optimal')
+            expr_G1.expr3 = oe.contract_expression('zcij,zcjd,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, self.n_head, max_len, rank), self.U2, distmask], constants=[2,3], optimize='optimal')
             expr_G1.expr4 = oe.contract_expression('zcij,zj,kd,kd,kij->zi', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.V2, self.U2, distmask], constants=[2,3,4], optimize='optimal')
 
             def expr_G2(x: torch.Tensor, h: torch.Tensor, **kwargs):
@@ -623,8 +674,8 @@ class DistanceShareHeadProbEncoder(nn.Module):
                 # ), dim=-1)
 
                 return torch.cat((
-                    expr_G1.expr1(h, x_most) + expr_G1.expr2(h, x_last),
-                    (expr_G1.expr3(h, x_most) + expr_G1.expr4(h, x_last)).unsqueeze(-1)
+                    expr_G2.expr1(h, x_most) + expr_G2.expr2(h, x_last),
+                    (expr_G2.expr3(h, x_most) + expr_G2.expr4(h, x_last)).unsqueeze(-1)
                 ), dim=-1)
             expr_G2.expr1 = oe.contract_expression('zcij,zia,adc,bdc,kij->zjb', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len, self.d_model-1), self.U1, self.V1, distmask], constants=[2,3,4], optimize='optimal')
             expr_G2.expr2 = oe.contract_expression('zcij,zi,kd,bdc,kij->zjb', *[(batch_size, self.n_head, max_len, max_len), (batch_size, max_len), self.U2, self.V1, distmask], constants=[2,3,4], optimize='optimal')
@@ -634,8 +685,8 @@ class DistanceShareHeadProbEncoder(nn.Module):
             # t = unary.softmax(dim=-1)
             # t = torch.randn_like(unary).to(device=x.device).softmax(dim=-1)
             # h = torch.randn(batch_size, self.n_head, max_len, max_len).to(device=x.device).softmax(dim=-1)
-            # diff = expr_F0(t) - expr_F(t)
-            # # diff = expr_G20(t, h) - expr_G2(t, h)
+            # # diff = expr_F0(t) - expr_F(t)
+            # diff = expr_G10(t, h) - expr_G1(t, h)
             # print(diff.norm(p=2))
             # exit()
 
