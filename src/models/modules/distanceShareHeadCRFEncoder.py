@@ -466,6 +466,9 @@ class DistanceShareHeadProbEncoder(nn.Module):
             self.norm_func = lambda x: F.softmax(x, dim=-1)
         elif self.norm == 'relu':
             self.norm_func = lambda x: F.normalize(F.relu(x), p=1, dim=-1)
+        elif self.norm == 'layernorm':
+            self.func = nn.LayerNorm(self.d_model)
+            self.norm_func = lambda x: self.func(x) if x.shape[-1] == self.d_model else F.softmax(x, dim=-1)
         else:
             raise ValueError("%s is not a normalization method." % self.norm)
 
