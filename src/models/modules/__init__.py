@@ -22,3 +22,4 @@ from .absGlobalHeadCRFEncoder import AbsGlobalHeadProbEncoder, AbsSingleGlobalHe
 from .relativeGlobalCRFEncoder import DecomposedGlobalHeadProbEncoder, FullyDecomposedGlobalHeadProbEncoder
 from .CRFEncoderVariations import DynamicEtaHeadProbEncoder
 from .distanceShareHeadCRFEncoder import DistanceShareInefficientHeadProbEncoder, DistanceShareHeadProbEncoder
+from .regCRFEncoder import RegularizedProbEncoder
