@@ -21,3 +21,5 @@ from .lazyHeadCRFEncoder import LazyHeadProbEncoder, HalfLazyHeadProbEncoder
 from .absGlobalHeadCRFEncoder import AbsGlobalHeadProbEncoder, AbsSingleGlobalHeadProbEncoder
 from .relativeGlobalCRFEncoder import DecomposedGlobalHeadProbEncoder, FullyDecomposedGlobalHeadProbEncoder
 from .CRFEncoderVariations import DynamicEtaHeadProbEncoder
+from .distanceShareHeadCRFEncoder import DistanceShareInefficientHeadProbEncoder, DistanceShareHeadProbEncoder
+from .regCRFEncoder import RegularizedProbEncoder
