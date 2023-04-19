@@ -1,0 +1,46 @@
+[Basic]
+random_seed = 0
+cuda_id     = 0
+
+base_path   = "../models/final-test"
+folder_name = "transformer-upos-ud"
+
+[Corpus]
+tag_type = "upos"
+
+    [Corpus.UD_ENGLISH]
+
+[Embeddings]
+
+    [Embeddings.OneHotEmbeddings]
+    embedding_length = 384
+    min_freq         = 1
+
+[SequenceTagger]
+tagger           = "CustomSequenceTagger"
+
+    [SequenceTagger.module]
+    name = "TransformerEncoder"
+    d_model = 384
+    d_ff = 2048
+    n_layers = 4
+    n_head = 10
+    d_qkv = 128
+    dropout = 0.15
+    pos_embed = "add"
+
+[Trainer]
+trainer              = "CustomModelTrainer"
+learning_rate        = 0.0001
+mini_batch_size      = 32
+max_epochs           = 100
+shuffle              = true
+eps                  = 1e-9
+weight_decay         = 1.8e-6
+
+anneal_factor        = 0.5
+patience             = 5
+min_learning_rate    = 0.0000001
+
+embeddings_storage_mode = 'none'
+

@@ -1,5 +1,5 @@
 """
-Evaluate on PTB CONLL dataset for unsupervised dependency parsing.
+Evaluate on CONLL-style dataset for unsupervised dependency parsing.
 
 MODE:
  - 'average': Use the average of all channels' probabilities as the score matrix.
@@ -10,9 +10,10 @@ MODE:
  - 'random': Random heads.
 """
 ## ================= MODIFY THE SETTING HERE =================
+TEST_FILE = None # Path to conll-style file as the dependency parsing test set. None for UD-English ewt test set.
 MODE = 'average' # Options: 'average', 'hit', 'best', 'left', 'right', 'random'
 ITERATION = -1 # Options: 1, 2, ...; -1 is the last iteration.
-ALGORITHM = 'argmax' # 'argmax', 'nonprojective', 'projective'
+ALGORITHM = 'argmax' # Options: 'argmax', 'nonprojective', 'projective'
 ## ===========================================================
 
 from pathlib import Path
@@ -45,7 +46,7 @@ import flair
 flair.set_seed(config["Basic"]["random_seed"])
 # flair.device = torch.device("cpu")
 
-from flair.datasets import ColumnDataset
+from flair.datasets import ColumnDataset, UD_ENGLISH
 import flair.embeddings
 from flair.data import Sentence
 from flair.training_utils import Metric
@@ -53,7 +54,13 @@ from flair.training_utils import Metric
 import models
 
 # load dataset
-test_dataset = ColumnDataset("/public/home/wuhy1/projects/tmp/wsj_sd33/test.gold.conllu", column_name_map={1: 'text', 6: 'head'})
+if TEST_FILE is None:
+    corpus = UD_ENGLISH()
+    test_dataset = corpus.test
+elif isinstance(TEST_FILE, str):
+    test_dataset = ColumnDataset(TEST_FILE, column_name_map={1: 'text', 6: 'head'})
+else:
+    raise ValueError("TEST_FILE is invalid (type {} instead of str). Example: '/home/wuhy/path/to/test.conllu'".format(type(TEST_FILE)))
 
 # initialize sequence tagger
 model_name = config["SequenceTagger"].pop("tagger", "CustomSequenceTagger")

@@ -2,8 +2,8 @@
 random_seed = 0
 cuda_id     = 0
 
-base_path   = "../models/task-name"
-folder_name = "model-name"
+base_path   = "../models/final-test"
+folder_name = "crf-pos-ud"
 
 [Corpus]
 tag_type = "pos"
@@ -51,3 +51,9 @@ patience             = 5
 min_learning_rate    = 0.0000001
 
 embeddings_storage_mode = 'none'
+
+[Trainer.add_norm]
+
+    [Trainer.add_norm.getTernaryNorm]
+        p = 2
+        lambda = 4e-4

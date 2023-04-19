@@ -1,0 +1,48 @@
+[Basic]
+random_seed = 0
+cuda_id     = 0
+
+base_path   = "../models/final-test"
+folder_name = "transformer-syn-cogs"
+
+[Corpus]
+tag_type = "pos"
+
+    [Corpus.COGS_SequenceLabeling]
+    mapping = 'relative'
+    test_split = 'gen'
+
+[Embeddings]
+
+    [Embeddings.OneHotEmbeddings]
+    embedding_length = 64
+    min_freq         = 1
+
+[SequenceTagger]
+tagger           = "MultiLabelSequenceTagger"
+
+    [SequenceTagger.module]
+    name = "RelativeTransformerEncoder"
+    d_model = 64
+    d_ff = 256
+    n_layers = 2
+    n_head = 4
+    d_qkv = 16
+    dropout = 0.1
+    pos_embed = "none"
+    e_length = 9
+
+[Trainer]
+trainer              = "CustomModelTrainer"
+learning_rate        = 0.0005
+mini_batch_size      = 100
+max_epochs           = 200
+shuffle              = true
+eps                  = 1e-9
+
+anneal_factor        = 0.5
+patience             = 5
+min_learning_rate    = 0.0000001
+
+embeddings_storage_mode = 'none'
+

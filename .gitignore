@@ -1,3 +1,5 @@
-/configs
+/configs/*
 /models
 __pycache__
+
+!/configs/best

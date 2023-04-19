@@ -1,0 +1,47 @@
+[Basic]
+random_seed = 0
+cuda_id     = 0
+
+base_path   = "../models/final-test"
+folder_name = "transformer-pos-ptb"
+
+[Corpus]
+tag_type = "pos"
+
+    [Corpus.PennTreebankCorpus]
+    splits = "0-18|19-21|22-24"
+
+[Embeddings]
+
+    [Embeddings.OneHotEmbeddings]
+    embedding_length = 512
+    min_freq         = 1
+
+[SequenceTagger]
+tagger           = "CustomSequenceTagger"
+
+    [SequenceTagger.module]
+    name = "TransformerEncoder"
+    d_model = 512
+    d_ff = 2048
+    n_layers = 5
+    n_head = 14
+    d_qkv = 32
+    dropout = 0.15
+    pos_embed = "add"
+
+[Trainer]
+trainer              = "CustomModelTrainer"
+learning_rate        = 0.0004
+mini_batch_size      = 64
+max_epochs           = 100
+shuffle              = true
+eps                  = 1e-9
+weight_decay         = 3.2e-6
+
+anneal_factor        = 0.5
+patience             = 5
+min_learning_rate    = 0.0000001
+
+embeddings_storage_mode = 'none'
+

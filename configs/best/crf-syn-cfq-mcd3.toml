@@ -2,13 +2,16 @@
 random_seed = 0
 cuda_id     = 0
 
-base_path   = "../models/task-name"
-folder_name = "model-name"
+base_path   = "../models/final-test"
+folder_name = "crf-syn-cfq-mcd3"
 
 [Corpus]
-tag_type = "pos"
+tag_type = "dependency"
 
-    [Corpus.UD_ENGLISH]
+    [Corpus.CFQ_Dependency]
+    split = "mcd3"
+    use_dev = true
+    in_memory = false
 
 [Embeddings]
 
@@ -17,37 +20,39 @@ tag_type = "pos"
     min_freq         = 1
 
 [SequenceTagger]
-tagger           = "CustomSequenceTagger"
+tagger           = "DependencyParser"
+hidden_size      = 256
+use_nonprojective = true
 
     [SequenceTagger.module]
     name             = "HalfLazyHeadProbEncoder"
     d_model          = 128
-    n_head           = 18
-    n_iter           = 2
+    n_head           = 8
+    n_iter           = 6
     damping_H        = 0
     damping_Z        = 0
     stepsize_H       = 1
     stepsize_Z       = 1
     regularize_H     = 1
     regularize_Z     = 1
-    dists            = "2, 3, 4"
+    dists            = "2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17"
     async_update     = true
-    use_td           = "no"
+    use_td           = "uv:16"
     dropout          = 0.1
     block_msg        = false
 
 [Trainer]
 trainer              = "CustomModelTrainer"
-learning_rate        = 0.0062
-mini_batch_size      = 64
-mini_batch_chunk_size= 16
+learning_rate        = 0.0025
+mini_batch_size      = 100
 max_epochs           = 100
 shuffle              = true
 eps                  = 1e-9
-weight_decay         = 2.2e-6
 
 anneal_factor        = 0.5
 patience             = 5
 min_learning_rate    = 0.0000001
 
 embeddings_storage_mode = 'none'
+
+num_workers          = 1

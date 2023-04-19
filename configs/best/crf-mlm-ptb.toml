@@ -1,0 +1,66 @@
+[Basic]
+random_seed = 0
+cuda_id     = 0
+
+base_path   = "../models/final-test"
+folder_name = "crf-mlm-ptb"
+
+[Corpus]
+tag_type = "mlm"
+
+    [Corpus.StandardPTBCorpus]
+
+
+[Embeddings]
+
+    [Embeddings.AutoMLMOneHotEmbeddings]
+    embedding_length = 384
+    with_mask        = true
+    init_strategy    = "xavier_uniform_"
+
+
+[SequenceTagger]
+tagger           = "MaskedLanguageModel"
+
+    [SequenceTagger.module]
+    name             = "HalfLazyHeadProbEncoder"
+    d_model          = 384
+    n_head           = 16
+    n_iter           = 5
+    damping_H        = 0
+    damping_Z        = 0
+    stepsize_H       = 1
+    stepsize_Z       = 1
+    regularize_H     = 1
+    regularize_Z     = 1
+    dists            = "2, 3, 4"
+    async_update     = true
+    use_td           = "uv:64"
+    dropout          = 0.15
+    block_msg        = false
+    
+
+[Trainer]
+trainer              = "MaskedLanguageModelTrainer"
+learning_rate        = 0.001
+mini_batch_size      = 64
+mini_batch_chunk_size= 16
+max_epochs           = 200
+late_save            = 0
+shuffle              = true
+eps                  = 1e-9
+weight_decay         = 1.4e-6
+
+anneal_factor        = 0.5
+patience             = 5
+min_learning_rate    = 0.0000001
+
+fix_dev_mask         = true
+fix_test_mask        = true
+use_bucket           = false
+
+[Trainer.add_norm]
+
+    [Trainer.add_norm.getTernaryNorm]
+        p = 2
+        lambda = 5e-4

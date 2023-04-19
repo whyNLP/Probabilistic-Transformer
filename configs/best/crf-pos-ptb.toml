@@ -2,13 +2,14 @@
 random_seed = 0
 cuda_id     = 0
 
-base_path   = "../models/task-name"
-folder_name = "model-name"
+base_path   = "../models/final-test"
+folder_name = "crf-pos-ptb"
 
 [Corpus]
 tag_type = "pos"
 
-    [Corpus.UD_ENGLISH]
+    [Corpus.PennTreebankCorpus]
+    splits = "0-18|19-21|22-24"
 
 [Embeddings]
 
@@ -22,8 +23,8 @@ tagger           = "CustomSequenceTagger"
     [SequenceTagger.module]
     name             = "HalfLazyHeadProbEncoder"
     d_model          = 128
-    n_head           = 18
-    n_iter           = 2
+    n_head           = 12
+    n_iter           = 3
     damping_H        = 0
     damping_Z        = 0
     stepsize_H       = 1
@@ -32,19 +33,19 @@ tagger           = "CustomSequenceTagger"
     regularize_Z     = 1
     dists            = "2, 3, 4"
     async_update     = true
-    use_td           = "no"
-    dropout          = 0.1
+    use_td           = "uv:128"
+    dropout          = 0.05
     block_msg        = false
 
 [Trainer]
 trainer              = "CustomModelTrainer"
-learning_rate        = 0.0062
-mini_batch_size      = 64
+learning_rate        = 0.0024
+mini_batch_size      = 16
 mini_batch_chunk_size= 16
 max_epochs           = 100
 shuffle              = true
 eps                  = 1e-9
-weight_decay         = 2.2e-6
+weight_decay         = 8e-6
 
 anneal_factor        = 0.5
 patience             = 5

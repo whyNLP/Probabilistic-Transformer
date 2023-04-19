@@ -1,0 +1,47 @@
+[Basic]
+random_seed = 0
+cuda_id     = 0
+
+base_path   = "../models/final-test"
+folder_name = "transformer-cls-sst5"
+
+[Corpus]
+tag_type = "class"
+
+    [Corpus.SENTEVAL_SST_GRANULAR]
+
+[Embeddings]
+
+    [Embeddings.OneHotEmbeddings]
+    embedding_length = 128
+    min_freq         = 1
+
+[SequenceTagger]
+tagger           = "CustomTextClassifier"
+add_cls          = true
+
+    [SequenceTagger.module]
+    name             = "TransformerEncoder"
+    d_model          = 128
+    d_ff             = 1024
+    n_layers         = 4
+    n_head           = 14
+    d_qkv            = 256
+    dropout          = 0
+    pos_embed        = "add"
+
+
+[Trainer]
+trainer              = "CustomModelTrainer"
+learning_rate        = 0.0002
+mini_batch_size      = 64
+max_epochs           = 100
+shuffle              = true
+eps                  = 1e-9
+weight_decay         = 2.7e-6
+
+anneal_factor        = 0.5
+patience             = 5
+min_learning_rate    = 0.0000001
+
+embeddings_storage_mode = 'none'

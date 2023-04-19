@@ -1,0 +1,430 @@
+# This is a template for config file.
+# Rename this file by removing postfix '.template' to set the config.
+
+
+[Basic]
+
+## Random seed. It will be effective for random, numpy, pytorch.
+random_seed = 0
+
+## Cuda ID. It will override the environment variable CUDA_VISIBLE_DEVICES. Set to 0 by default.
+cuda_id     = 0
+
+## Where to store the trial data, including log files, model checkpoints, test results.
+## All data will be placed at {base_path}/{folder_name}. If the folder does not exist, it will create a new one.
+base_path   = "../models/task-name"
+folder_name = "model-name"
+
+
+
+[Corpus]
+
+## Tag type for prediction. It depends on the task and dataset. Custom names are allowed.
+## See flair documents (https://flairnlp.github.io/docs/tutorial-training/how-to-train-sequence-tagger) for more details.
+## Example: "upos", "pos", "ner", "mlm", "class".
+tag_type = "pos"
+
+
+    ## Below defines the corpus to use for training/testing. Please only use one corpus for each trail.
+    ## Supports all datasets provided by flair (https://github.com/flairNLP/flair), and the following.
+
+
+    ## The Penn Treebank 3 dataset ====================================================================================
+    ## - Description: The PTB datset from LDC.
+    ## - Source: https://catalog.ldc.upenn.edu/LDC99T42
+    ## - Supported Tag Types: "mlm", "pos"
+    ##
+    ## :param splits: Section splits for Penn Treebank.
+    ##                  A split is composed of 3 datasets (train|dev|test), seperated by '|'. Each dataset 
+    ##                  is represented by numbers seperated by commas. You can use '-' to represent a continuous
+    ##                  range of numbers (e.g.: "0,1,3-5,9|7|22-24"). These numbers are the section numbers in 
+    ##                  Penn Treebank, from 0 to 24. Default: "2-21|22|23"
+    ## :param base_path: Base path for flair storage. Usually use default setting.
+    ## :param in_memory: If set to True, keeps full dataset in memory, otherwise does disk reads
+    ##
+    # [Corpus.PennTreebankCorpus]
+    # splits = "0-18|19-21|22-24"
+
+
+    ## The Penn Treebank 3 dataset ====================================================================================
+    ## - Description: The standard 10,000 word Penn Treebank corpus.
+    ## - Source: http://www.fit.vutbr.cz/~imikolov/rnnlm/
+    ##           Mikolov Tomáš: Statistical Language Models based on Neural Networks. PhD thesis, Brno University of Technology, 2012.
+    ## - Supported Tag Types: "mlm"
+    ##
+    ## :param base_path: Base path for flair storage. Usually use default setting.
+    ## :param in_memory: If True, keeps dataset in memory giving speedups in training.
+    ##
+    # [Corpus.StandardPTBCorpus]
+
+
+    ## The BLLIP 1987-89 WSJ Corpus Release 1 dataset =================================================================
+    ## - Description: The BLLIP dataset from LDC. You have to manually download the dataset from LDC and set base_path as 
+    ##                the path to the tar file.
+    ## - Source: https://catalog.ldc.upenn.edu/LDC2000T43
+    ## - Supported Tag Types: "mlm", "pos"
+    ##
+    ## :param base_path: Path to the tar file downloaded from LDC.
+    ## :param in_memory: If True, keeps dataset in memory giving speedups in training. In some conditions, the memory is
+    ##                   not large enough to hold the entire dataset, in which case you should set it to False.
+    ## :param mode: Which split to use. Default: 'XS'. Options:
+    ##              - XS: train 40k, dev 20k, test 20k
+    ##              - SM: train 200k, dev 20k, test 20k
+    ##              - MD: train 600k, dev 20k, test 20k
+    ##              - LG: train 1756k, dev 20k, test 20k
+    ##              - FULL: train 81%, dev 9%, test 10%
+    ##              - CUSTOM: defined with parameters.
+    ## :param train_set_size: Number of sentences in the randomly split training set. Useful only if mode is CUSTOM.
+    ## :param dev_set_size: Number of sentences in the randomly split dev set. Useful only if mode is CUSTOM.
+    ## :param test_set_size: Number of sentences in the randomly split test set. Useful only if mode is CUSTOM.
+    ## :param use_cache: Cache the dataset so that the second read will be much faster. Default: True
+    ##
+    # [Corpus.BLLIPCorpus]
+    # base_path = "/path/to/bliip_87_89_wsj_LDC2000T43.tgz"
+    # in_memory = true
+    # mode = 'XS'
+
+
+    ## The BLLIP 1987-89 WSJ Corpus Release 1 dataset =================================================================
+    ## - Description: The BLLIP dataset from LDC, with options to do subword tokenization. You have to manually 
+    ##                download the dataset from LDC and set base_path as the path to the tar file.
+    ## - Source: https://catalog.ldc.upenn.edu/LDC2000T43
+    ## - Supported Tag Types: "mlm"
+    ##
+    ## :param base_path: Path to the tar file downloaded from LDC. It will preprocess and cache the dataset when loading
+    ##                   the dataset for the first time, so feel free to remove this parameter after the first run.
+    ## :param in_memory: If True, keeps dataset in memory giving speedups in training. In some conditions, the memory is
+    ##                   not large enough to hold the entire dataset, in which case you should set it to False.
+    ## :param mode: Which split to use. Options: 'XS', 'SM', 'MD', 'LG', 'FULL'.
+    ## :param use_subtoken: Use GPT2Tokenizer to do subword tokenization. Default: True.
+    ## :param min_freq: The minimal frequency for a token to appear in the vocabulary. Default: 1.
+    ##
+    # [Corpus.BLLIPTextCorpus]
+    # base_path = "/path/to/bliip_87_89_wsj_LDC2000T43.tgz"
+    # in_memory = true
+    # mode = 'XS'
+
+
+    ## The BLLIP 1987-89 WSJ Corpus Release 1 dataset =================================================================
+    ## - Description: BLLIP corpus follow the UDGN (https://aclanthology.org/2022.acl-long.327/) setting. You have to manually 
+    ##                download the dataset from LDC and set base_path as the path to the tar file.
+    ## - Source: https://catalog.ldc.upenn.edu/LDC2000T43
+    ## - Supported Tag Types: "mlm"
+    ##
+    ## :param base_path: Path to the tar file downloaded from LDC. It will preprocess and cache the dataset when loading
+    ##                   the dataset for the first time, so feel free to remove this parameter after the first run.
+    ## :param in_memory: If True, keeps dataset in memory giving speedups in training. In some conditions, the memory is
+    ##                   not large enough to hold the entire dataset, in which case you should set it to False.
+    ## :param mode: Which split to use. Options: 'XS', 'SM', 'MD', 'LG', 'FULL'.
+    ## :param min_freq: The minimal frequency for a token to appear in the vocabulary. Following UDGN, by default the
+    ##                  the value is 28.
+    ##
+    # [Corpus.UDGNBLLIPTextCorpus]
+    # base_path = "/path/to/bliip_87_89_wsj_LDC2000T43.tgz"
+    # in_memory = true
+    # mode = 'XS'
+
+
+    ## The Universal Dependency dataset ===============================================================================
+    ## - Description: Flair dataset (https://github.com/flairNLP/flair)
+    ## - Source: https://universaldependencies.org/
+    ## - Supported Tag Types: "pos", "upos", ...
+    ##
+    [Corpus.UD_ENGLISH]
+
+
+    ## The CoNLL-03 dataset ===========================================================================================
+    ## - Description: Flair dataset (https://github.com/flairNLP/flair), but support auto-download. (Now flair 0.12.0 
+    ##                supports auto-download too.
+    ## - Source: https://www.clips.uantwerpen.be/conll2003/ner/
+    ## - Supported Tag Types: "ner", ...
+    ##
+    # [Corpus.AUTO_CONLL_03]
+
+
+    ## The Stanford sentiment treebank dataset of SentEval ============================================================
+    ## - Description: Flair dataset (https://github.com/flairNLP/flair). classified into NEGATIVE or POSITIVE sentiment.
+    ## - Source: https://github.com/facebookresearch/SentEval
+    ## - Supported Tag Types: "class"
+    ##
+    # [Corpus.SENTEVAL_SST_BINARY]
+
+
+    ## The Stanford sentiment treebank dataset of SentEval ============================================================
+    ## - Description: Flair dataset (https://github.com/flairNLP/flair). classified into 5 sentiment classes.
+    ## - Source: https://github.com/facebookresearch/SentEval
+    ## - Supported Tag Types: "class"
+    ##
+    # [Corpus.SENTEVAL_SST_GRANULAR]
+
+
+    ## The COGS dataset ===============================================================================================
+    ## - Description: COGS is a semantic parsing dataset based on a fragment of English. Originally proposed by 
+    ##                Kim and Linzen (https://aclanthology.org/2020.emnlp-main.731/). This dataset is a sequence
+    ##                labeling version proposed by Ontanón et al. (https://arxiv.org/abs/2108.04378).
+    ## - Source: https://github.com/google-research/google-research/tree/master/compositional_transformers
+    ## - Supported Tag Types: "pos"
+    ##
+    ## :param dev_split: Which dev set to use. Options:
+    ##                   - 'dev': Use the original in-vocab dev set. 
+    ##                   - 'gen': Use the out-of-vocab generated dev set.
+    ## :param test_split: Which test set to use. Options:
+    ##                   - 'test': Use the original in-vocab test set. 
+    ##                   - 'gen': Use the out-of-vocab generated test set.
+    ## :param mapping: Which way for prediction. For more details, refer to the paper (https://arxiv.org/abs/2108.04378).
+    ##                 Options: 'classifier', 'relative', 'attention'.
+    ##
+    # [Corpus.COGS_SequenceLabeling]
+    # mapping = 'relative'
+    # test_split = 'gen'
+
+
+    ## The CFQ dataset ================================================================================================
+    ## - Description: A dependency parsing version of Compositional Freebase Questions (CFQ) challenge.
+    ##                CFQ was proposed by Keysers et al. (https://arxiv.org/abs/1912.09713). The dependency version was
+    ##                proposed in papaer Compositional Generalization in Dependency Parsing (Goodwin et al.，
+    ##                https://aclanthology.org/2022.acl-long.448/). Notice that this dataset is quite large.
+    ## - Source: https://github.com/emilygoodwin/CFQ-dependencies
+    ## - Supported Tag Types: "dependency"
+    ##
+    ## :param split: Dataset split. Options: 'mcd1', 'mcd2', 'mcd3', 'random'. Default: 'random'.
+    ##               * Hidden options: 'question_complexity', 'question_pattern', 'query_complexity', 'query_pattern'.
+    ##                 Not recommended in this setting.
+    ## :param use_dev: Use the official dev set. In the paper above, the author argues that the
+    ##                 original dev split has the same distribution as the test set, which results in leaking
+    ##                 the information of the test distribution. If set to False, then randomly pick 20% samples
+    ##                 from the train set as the dev set. Notice that this may result in different splits on
+    ##                 different devices. Though the result should not be affected too much.
+    ## :param in_memory: If True, keeps dataset in memory giving speedups in training. In some conditions, the memory is
+    ##                   not large enough to hold the entire dataset, in which case you should set it to False.
+    ##
+    # [Corpus.CFQ_Dependency]
+    # split = "mcd1"
+    # use_dev = true
+    # in_memory = false
+
+
+
+## Uncomment the following lines to make a down sample of the corpus
+# [CorpusDownSample]
+# percentage         = 0.1
+# downsample_train   = true
+# downsample_dev     = true
+# downsample_test    = false
+
+
+
+[Embeddings]
+
+    ## Embedding provided by flair, each token has a vector representation.
+    ## The tokens with frequency in train set no less than min_freq compose the vocabulary. Others will be treated as <unk>.
+    ##
+    [Embeddings.OneHotEmbeddings]
+    embedding_length = 128
+    min_freq         = 1
+
+
+    ## Embedding for MLM task. Similar to flair OneHotEmbeddings, but add additional <MASK> token to the vocabulary.
+    ## :param init_strategy: Use torch.nn.init.<init_strategy> to init the embedding.
+    ##
+    # [Embeddings.MLMOneHotEmbeddings]
+    # embedding_length = 128
+    # min_freq         = 1
+    # init_strategy    = "xavier_uniform_"
+
+
+    ## Embedding for MLM task. Use the vocabulary provided in the corpus setting (PTB, BLLIP).
+    ## :param with_mask: Add additional <MASK> token to the vocabulary.
+    ## :param init_strategy: Use torch.nn.init.<init_strategy> to init the embedding.
+    ##
+    # [Embeddings.AutoMLMOneHotEmbeddings]
+    # embedding_length = 384
+    # with_mask        = true
+    # init_strategy    = "xavier_uniform_"
+
+
+
+[SequenceTagger]
+
+## Which task specific model to use for training. Options:
+##  - "CustomSequenceTagger": Sequence Labeling task. (tag_type: pos, ner)
+##  - "CustomTextClassifier": Text classification task. (tag_type: class)
+##  - "MaskedLanguageModel": Masked Language Model task. (tag_type: mlm)
+##  - "MultiLabelSequenceTagger": Multiple Sequence Labeling task. (CGOS dataset)
+##  - "DependencyParser": Dependency Parsing task. (CFQ dataset)
+##
+tagger           = "CustomSequenceTagger"
+
+
+## (Optional) Only valid if tagger = "CustomTextClassifier"
+## Add a [CLS] token at the front of each sentence, and predict the label using its representation.
+## Otherwise predict the label of a sentence using the first token of the sentence.
+##
+# add_cls          = false
+
+
+## (Optional) If True, adds trainable linear map on top of embedding layer. If False, no map.
+## If you set this to an integer, you can control the dimensionality of the reprojection layer
+## Used in ALBERT (Lan, Z. et al. https://arxiv.org/abs/1909.11942)
+##
+# reproject_embeddings = 768
+
+
+## (Optional) Only valid if tagger = "MaskedLanguageModel"
+## Use the embedding matrix as the final projector. A common regularization on MLM task.
+##
+# reuse_embedding_weight = true
+
+
+
+    ## Below defines the core encoder module (Probabilistic Transformer, Transformer, Universal Transformer, etc.)
+    ## See src/models/modules for more details. All modules registered in src/models/modules/__init__.py are ready to use.
+    ## For each module, refer to its doc string for the usage.
+
+
+    ## Identity encoder. The word embedding is the final representation.
+    # [SequenceTagger.module]
+    # name             = "Identity"
+
+
+    ## Probabilistic Transformer. Slightly optimized for speed.
+    ##     :param d_model: dimensions of Z nodes.
+    ##     :param n_head: number of heads.
+    ##     :param n_iter: number of iterations.
+    ##     :param damping_H: damping of H nodes update. 0 means no damping is applied.
+    ##     :param damping_Z: damping of Z nodes update. 0 means no damping is applied.
+    ##     :param stepsize_H: step size of H nodes update. 1 means full update is applied.
+    ##     :param stepsize_Z: step size of Z nodes update. 1 means full update is applied.
+    ##     :param regularize_H: regularization for updating H nodes.
+    ##     :param regularize_Z: regularization for updating Z nodes.
+    ##             'regularize_H' and 'regularize_Z' are regularizations for MFVI. See 
+    ##             'Regularized Frank-Wolfe for Dense CRFs: GeneralizingMean Field and 
+    ##             Beyond' (Ð.Khuê Lê-Huu, 2021) for details.
+    ##     :param norm: normalization method. Options: ['softmax', 'relu'], Default: 'softmax'.
+    ##     :param dists: distance pattern. Each distance group will use different factors. 
+    ##                   Dists should be groups of numbers seperated by ','. Each number represents
+    ##                   a seperate point. Empty means all tenery factors share the same parameters.
+    ##                   Note that the minimum seperate point you input should be 2. Default: "".
+    ##                   E.g. "" -> [1, +oo)
+    ##                        "3" -> [1, 2), [3, +oo)
+    ##                        "2, 4" -> [1, 2), [2, 4), [4, +oo)
+    ##                             i.e. {1}, {2, 3}, [4, +oo)
+    ##     :param async_update: update the q values asyncronously (Y first, then Z). Default: True.
+    ##     :param output_prob: If true, output a normalized probabilistic distribution. Otherwise
+    ##                         output unnormalized scores.
+    ##     :param use_td: control tensor decomposition. Options:
+    ##                      - 'no': no tensor decomposition;
+    ##                      - 'uv:{rank}': each 'head' decompose to 2 matrices W = U @ V. Use a
+    ##                        number to set the rank, e.g. 'uv:64';
+    ##                      - 'uvw:{rank}': decompose to sum of product of 3 vectors 
+    ##                        W = \sum U * V * W, where * is the outer product. Use a number to set
+    ##                        the rank, e.g. 'uvw:64'.
+    ##                    Default: 'no'.
+    ##     :param dropout: dropout for training. Default: 0.1.
+    ##     :param block_msg: block the message passed to Z_j in factor (H_i=k, Z_i=a, Z_j=b). Default: False.
+    ##     :param use_projection: project the output using a feedforward block like transformer. Default: False.
+    ##
+    [SequenceTagger.module]
+    name             = "HalfLazyHeadProbEncoder"
+    d_model          = 128
+    n_head           = 18
+    n_iter           = 2
+    damping_H        = 0
+    damping_Z        = 0
+    stepsize_H       = 1
+    stepsize_Z       = 1
+    regularize_H     = 1
+    regularize_Z     = 1
+    dists            = "2, 3, 4"
+    async_update     = true
+    use_td           = "no"
+    dropout          = 0.1
+    block_msg        = false
+
+
+    ## Vanilla Transformer.
+    ## The hyperparameter names should be easy to recognize...
+    ##     :param pos_embed: Positional Encoding. Options: 'cos', 'add'.
+    ## 
+    # [SequenceTagger.module]
+    # name             = "TransformerEncoder"
+    # d_model          = 256
+    # d_ff             = 2048
+    # n_layers         = 4
+    # n_head           = 14
+    # d_qkv            = 128
+    # dropout          = 0.15
+    # pos_embed        = "add"
+
+
+    ## Transformer with RPE.
+    ## Following Self-Attention with Relative Position Representations (https://arxiv.org/abs/1803.02155).
+    ##     :param e_length: Create (2 * e_length - 1) bins for RPE.
+    ##     :param mode: Add RPE on Q, K or V. Options: 'q', 'k', 'v', 'qk', 'kv', 'qv', 'qkv'
+    ## 
+    # [SequenceTagger.module]
+    # name               = "RelativeTransformerEncoder"
+    # d_model            = 64
+    # d_ff               = 256
+    # n_layers           = 2
+    # n_head             = 4
+    # d_qkv              = 16
+    # dropout            = 0.1
+    # pos_embed          = "none"
+    # e_length           = 9
+    # mode               = "k"
+
+
+
+[Trainer]
+
+## Which task specific trainer to use for training. Options:
+##  - "MaskedLanguageModelTrainer": Masked Language Model task. (tag_type: mlm)
+##  - "CustomModelTrainer": All the rest tasks.
+##
+trainer              = "CustomModelTrainer"
+
+
+## All the following options are consistent with a flair trainer.
+## See more details in https://github.com/flairNLP/flair/blob/v0.8/flair/trainers/trainer.py#L63
+##
+learning_rate        = 0.0062
+mini_batch_size      = 64
+mini_batch_chunk_size= 16
+max_epochs           = 100
+shuffle              = true
+
+anneal_factor        = 0.5
+patience             = 5
+min_learning_rate    = 0.0000001
+
+embeddings_storage_mode = 'none'
+
+
+## Optimizer. By default using torch.optim.Adam
+## Notice that this might affect the optimizer parameters. For example, torch.optim.SGD does not have parameter 'eps'.
+##
+# optimizer            = "torch.optim.SGD"
+eps                  = 1e-9
+weight_decay         = 2.2e-6
+
+
+## Only valid if trainer = "MaskedLanguageModelTrainer"
+## Fix the masked words in dev/test set. Put sentences with similar lengths in to the same batch to accelerate.
+##
+# fix_dev_mask         = true
+# fix_test_mask        = true
+# use_bucket           = false
+
+
+## Add additional regularization term to train loss
+## It depends on the module implementation.
+##
+# [Trainer.add_norm]
+
+    ## In Probabilistic Transformer, we sometimes add a regularization term to the ternary score tensor.
+    ## We empirically find it helpful to improve the performance on MLM tasks.
+    ##
+    # [Trainer.add_norm.getTernaryNorm]
+    #     p = 2
+    #     lambda = 4e-4

@@ -1,0 +1,52 @@
+[Basic]
+random_seed = 0
+cuda_id     = 0
+
+base_path   = "../models/final-test"
+folder_name = "transformer-syn-cfq-mcd3"
+
+[Corpus]
+tag_type = "dependency"
+
+    [Corpus.CFQ_Dependency]
+    split = "mcd3"
+    use_dev = true
+    in_memory = false
+
+[Embeddings]
+
+    [Embeddings.OneHotEmbeddings]
+    embedding_length = 128
+    min_freq         = 1
+
+[SequenceTagger]
+tagger           = "DependencyParser"
+hidden_size      = 256
+use_nonprojective = true
+
+    [SequenceTagger.module]
+    name = "RelativeTransformerEncoder"
+    d_model = 128
+    d_ff = 512
+    n_layers = 6
+    n_head = 8
+    d_qkv = 16
+    dropout = 0.1
+    pos_embed = "none"
+    e_length = 17
+
+[Trainer]
+trainer              = "CustomModelTrainer"
+learning_rate        = 0.0005
+mini_batch_size      = 100
+max_epochs           = 100
+shuffle              = true
+eps                  = 1e-9
+
+anneal_factor        = 0.5
+patience             = 5
+min_learning_rate    = 0.0000001
+
+embeddings_storage_mode = 'none'
+
+num_workers          = 1

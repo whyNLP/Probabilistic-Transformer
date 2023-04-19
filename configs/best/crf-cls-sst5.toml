@@ -2,28 +2,30 @@
 random_seed = 0
 cuda_id     = 0
 
-base_path   = "../models/task-name"
-folder_name = "model-name"
+base_path   = "../models/final-test"
+folder_name = "crf-cls-sst5"
 
 [Corpus]
-tag_type = "pos"
+tag_type = "class"
 
-    [Corpus.UD_ENGLISH]
+    [Corpus.SENTEVAL_SST_GRANULAR]
 
 [Embeddings]
 
     [Embeddings.OneHotEmbeddings]
-    embedding_length = 128
+    embedding_length = 256
     min_freq         = 1
 
 [SequenceTagger]
-tagger           = "CustomSequenceTagger"
+tagger           = "CustomTextClassifier"
+add_cls          = false
 
     [SequenceTagger.module]
-    name             = "HalfLazyHeadProbEncoder"
-    d_model          = 128
+    name             = "RootedHeadProbEncoder"
+    d_model          = 256
+    d_root           = 512
     n_head           = 18
-    n_iter           = 2
+    n_iter           = 4
     damping_H        = 0
     damping_Z        = 0
     stepsize_H       = 1
@@ -32,19 +34,21 @@ tagger           = "CustomSequenceTagger"
     regularize_Z     = 1
     dists            = "2, 3, 4"
     async_update     = true
-    use_td           = "no"
-    dropout          = 0.1
+    use_td           = "uvw:64"
+    dropout          = 0.05
     block_msg        = false
+    output_root      = true
+
 
 [Trainer]
 trainer              = "CustomModelTrainer"
-learning_rate        = 0.0062
+learning_rate        = 0.0002
 mini_batch_size      = 64
-mini_batch_chunk_size= 16
+mini_batch_chunk_size= 32
 max_epochs           = 100
 shuffle              = true
 eps                  = 1e-9
-weight_decay         = 2.2e-6
+weight_decay         = 3e-7
 
 anneal_factor        = 0.5
 patience             = 5
