@@ -67,6 +67,7 @@ class CustomSequenceTagger(SequenceTagger):
              }
         (if any tag's weight is unspecified it will default to 1.0)
 
+        Notice that in NER tasks we predict labels with the BIOES scheme but the outputs will convert back to the BIO scheme.
         """
 
         super(SequenceTagger, self).__init__()
