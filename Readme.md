@@ -1,9 +1,9 @@
 # Probabilistic Transformer
 
-The code base for project **Probabilistic Transformer**, a model of contextual word representation from a syntactic and probabilistic perspective.
+The code base for project **Probabilistic Transformer**, a model of contextual word representation from a syntactic and probabilistic perspective. The paper "Probabilistic Transformer: A Probabilistic Dependency Model for Contextual Word Representation" was accepted to ACL2023 Findings.
 
 > **Warning**  
-> This git branch is only for reproducing the results. The codes are developed in a way that is easy to integrate with all kinds of modules, but not well-optimized for speed. The repo structure is a bit messy. The framework it uses ([flair](https://github.com/flairNLP/flair)) is outdated. Further development based on this branch is not encouraged.
+> In this git branch, the codes are developed in a way that is easy to integrate with all kinds of modules, but not well-optimized for speed. The repo structure is a bit messy and the framework it uses ([flair](https://github.com/flairNLP/flair)) is outdated.
 
 ## Preparation
 
@@ -156,13 +156,13 @@ where `<CONFIG_FILE>` should be replaced by the config file in the tables below.
 
 That is simple. Go to `src/train.py` and add `exit(0)` before training (line 105). Execute the training command in the login node (where you have access to the Internet). It will download the dataset without training the model. Finally, remove the line of code you added and train the model in the compute node.
 
-> 2. Why not test on the GLUE dataset?
+> 2. Which type of positional encoding do you use for transformers?
+
+We use absolute positional encoding for transformers in our experiments. Though the computation graph of probabilistic transformers is closer to that of transformers with relative positional encoding, we empirically find that positional encoding hardly makes any difference to the performance of transformers.
+
+> 3. Why not test on the GLUE dataset?
 
 GLUE is a standard benchmark for language understanding, and most recent works with strong pre-trained word representations choose to test their models on this dataset. Our work does not involve pre-training, which indicates a weak ability for language understanding. To better evaluate the ability of word representation for our model, we think it might be more suitable to compare our model with a vanilla transformer on MLM and POS tagging tasks than GLUE.
-
-> 3. Probabilistic Transformers take much more time to converge than transformers. Why?
-
-Actually, experiments show that Probabilistic Transformers converge much faster than transformers in the early stage. For example, after 10 epochs of training on the MLM task PTB dataset, Probabilistic Transformers reach a perplexity of 194.69 on the PTB dev set, while transformers have a perplexity of 239.06. However, at the end of the training transformers could converge to a better local optimum. In addition, due to the inefficient positional representation, Probabilistic Transformers are slower to train than transformers (for the same number of training samples).
 
 > 4. How strong is your baseline?
 
@@ -198,3 +198,7 @@ To make sure our baseline (transformer) implementation is strong enough, part of
 |  SYN  | CFQ-mcd3 |  EM / LAS  | Universal Transformer, Ours                                                                                                                  | 71.49 $\pm$ 5.39 / 94.57 $\pm$ 1.25 |
 
 </details>
+
+> 5. I have trouble understanding / running the code. Could you help me with it?
+
+Sure. Welcome to create an issue or email me at wuhy1@shanghaitech.edu.cn.
