@@ -1,5 +1,16 @@
 # Probabilistic Transformer
 
+<div align="center">
+<img width="200" src="https://github.com/whyNLP/Probabilistic-Transformer/assets/43395692/d0e75012-f52c-470e-adc2-453b72b71fab" />
+<p>
+  A probabilistic dependency model
+  <br>
+  shares a similar computation graph with transformers
+  <br>
+  That is the Probabilistic Transformer
+</p>
+</div>
+
 The code base for project **Probabilistic Transformer**, a model of contextual word representation from a syntactic and probabilistic perspective. The paper "Probabilistic Transformer: A Probabilistic Dependency Model for Contextual Word Representation" was accepted to ACL2023 Findings.
 
 > **Warning**  
