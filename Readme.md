@@ -13,8 +13,16 @@
 
 The code base for project **Probabilistic Transformer**, a model of contextual word representation from a syntactic and probabilistic perspective. The paper "[Probabilistic Transformer: A Probabilistic Dependency Model for Contextual Word Representation](https://faculty.sist.shanghaitech.edu.cn/faculty/tukw/acl-f23pt.pdf)" was accepted to ACL2023 Findings.
 
+<details>
+<summary>The Map of AI Approaches</summary>
+<div align="center">
+<img width="400" src="https://github.com/whyNLP/Probabilistic-Transformer/assets/43395692/55df3127-ea9d-4005-9e29-c2d836850f50" />
+</div>
+</details>
+
 > **Warning**  
 > In this git branch, the codes are developed in a way that is easy to integrate with all kinds of modules, but not well-optimized for speed. The repo structure is a bit messy and the framework it uses ([flair](https://github.com/flairNLP/flair)) is outdated.
+
 
 ## Preparation
 
